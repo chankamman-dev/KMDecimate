@@ -1,0 +1,15 @@
+# KM 减面 ZBrush 端中文词条。改完运行 py -3 tools/build_lang.py 生成 KMDecimate/lang_zh.bin。
+# 列：序号<Tab>按钮名(消息条目留空)<Tab>中文标签(≤21 个汉字)<Tab>中文提示/消息(≤53 个汉字)
+# 序号就是 KMDecimate.txt 里 kdLI 用的编号，不要改动已有编号。
+0	Decimate	减面	对当前子工具减面。开着“保留原物体”时先复制一份再减，结果在它下面，名字带 _KM 和百分比
+1	Percent	保留百分比	保留原来三角形数量的百分之几（10 = 减到十分之一）
+2	Keep Groups	保留组边界	尽量不让 polygroup 的边界变形
+3	Keep Original	保留原物体	开：复制一份再减，原物体不动（方便对比）；关：直接减当前子工具（有细分级时仍会复制）
+4	About	关于	KM 减面 0.1
+10			KM 减面：请先选中一个可编辑的 PolyMesh3D 子工具。
+11			KM 减面：没等到 KMDecimate.exe 的结果（日志在 C:\Users\Public\KMDecimate\work\log.txt）
+12			KM 减面：GoZ 导出失败。
+13			导出
+14			导入
+15			全程
+16			KM 减面 0.1：多线程 QEM 减面原型。日志在 C:\Users\Public\KMDecimate\work\log.txt

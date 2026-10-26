@@ -1,0 +1,7 @@
+# 构建产物（build.ps1 / tools/package.py 重新生成）
+bin/
+dist/
+# 测试模型和对比结果，体积大
+bench/
+__pycache__/
+*.pyc

@@ -1,0 +1,385 @@
+// KM Decimate 0.1 - fast multi-threaded decimation (prototype, to compare with Decimation Master)
+// ZBrush 2024 / 2026, ZScript only. Install: copy KMDecimate.txt and the KMDecimate folder into ZStartup\ZPlugs64.
+// ZBrush exports the subtool as GoZ, KMDecimate\KMDecimate.exe decimates it and writes a GoZ back, ZBrush imports it.
+// By default the active subtool is duplicated first and only the copy is decimated (name gets _KM<percent>).
+// Exchange folder: C:\Users\Public\KMDecimate\work\
+// Keep this file ASCII only: the ZScript compiler drops other characters. Chinese text lives in KMDecimate\lang_zh.bin
+
+[IConfig,2020]
+[IShowActions,0]
+[ISubPalette,"Zplugin:KM Decimate"]
+
+// ---------------------------------------------------------------- globals
+[VarDef,kdZFU,"KMDecimate\ZFileUtils64.dll"]
+[VarDef,kdExe,"KMDecimate\KMDecimate.exe"]
+[VarDef,kdTpl,"KMDecimate\KMDecimate.GoZ"]
+[VarDef,kdRoot,"C:\Users\Public\KMDecimate\"]
+[VarDef,kdWork,"C:\Users\Public\KMDecimate\work\"]
+[VarDef,kdGoz,"C:\Users\Public\KMDecimate\work\in.GoZ"]
+[VarDef,kdRes,"C:\Users\Public\KMDecimate\work\out.GoZ"]
+[VarDef,kdSetPath,"C:\Users\Public\KMDecimate\settings.zvr"]
+[VarDef,kdNL,[StrMerge,[StrFromAsc,13],[StrFromAsc,10]]]
+
+[VarDef,kdName,""]
+[VarDef,kdName2,""]
+[VarDef,kdTmp,""]
+[VarDef,kdLine,""]
+[VarDef,kdStat,""]
+[VarDef,kdErr,0]
+[VarDef,kdLen,0]
+[VarDef,kdWPos,0]
+[VarDef,kdOK,0]
+[VarDef,kdIdx,0]
+[VarDef,kdCF,0]
+[VarDef,kdOpen,0]
+[VarDef,kdCopy,0]
+[VarDef,kdTexOn,0]
+[VarDef,kdEP(12),0]
+[VarDef,kdSc(4),0]
+[VarDef,kdReimp,0]
+[VarDef,kdT0,0]
+[VarDef,kdT1,0]
+[VarDef,kdT2,0]
+[VarDef,kdT3,0]
+[VarDef,kdD1,0]
+[VarDef,kdD2,0]
+[VarDef,kdD3,0]
+[VarDef,kdW1,"export "]
+[VarDef,kdW2,"import "]
+[VarDef,kdW3,"total "]
+
+// settings: 0 percent to keep  1 keep polygroup borders  2 keep the original (decimate a copy)  3 threads (0 = all)
+[VarDef,kdSet(4),0]
+[VarSet,kdSet(0),10]
+[VarSet,kdSet(1),1]
+[VarSet,kdSet(2),1]
+[VarSet,kdSet(3),0]
+[If,[FileExists,kdSetPath],[VarLoad,kdSet,kdSetPath]]
+
+// ---------------------------------------------------------------- language: fixed 256 byte records (key 32 | label 64 | tip 160), UTF-8
+[VarDef,kdLangOK,0]
+[VarDef,kdLI,0]
+[VarDef,kdTip,""]
+[VarDef,kdMsg,""]
+[VarDef,kdLangPath,[FileNameResolvePath,"KMDecimate\lang_zh.bin"]]
+[If,[FileExists,kdLangPath],
+	[MemCreateFromFile,kdLangMem,kdLangPath]
+	[If,[MemGetSize,kdLangMem]>=4096,[VarSet,kdLangOK,1],[MemDelete,kdLangMem]]
+]
+
+// kdLI -> kdTip / kdMsg (keep the English default when there is no language file)
+[RoutineDef,kdTipOf,
+	[If,kdLangOK,[MemReadString,kdLangMem,kdTip,kdLI*256+96]]
+]
+[RoutineDef,kdText,
+	[If,kdLangOK,[MemReadString,kdLangMem,kdMsg,kdLI*256+96]]
+]
+
+// show the label of record kdLI on interface item kdTmp
+[RoutineDef,kdLabel,
+	[If,kdLangOK,
+		[If,[IExists,kdTmp],
+			[MemDelete,kdNB]
+			[MemCreate,kdNB,256,0]
+			[MemCopy,kdLangMem,kdLI*256+32,kdNB,0,64]
+			[FileExecute,kdZFU,"RenameButton",kdTmp,,kdNB]
+			[MemDelete,kdNB]
+		]
+	]
+]
+
+// ---------------------------------------------------------------- helpers
+[RoutineDef,kdSave,[VarSave,kdSet,kdSetPath]]
+
+[RoutineDef,kdMakeDir,
+	[If,![FileExecute,kdZFU,"FolderExists",kdTmp],
+		[VarSet,kdErr,[FileExecute,kdZFU,"MakeFolder",kdTmp]]
+	]
+]
+
+[RoutineDef,kdEnsureDirs,
+	[VarSet,kdTmp,kdRoot][RoutineCall,kdMakeDir]
+	[VarSet,kdTmp,kdWork][RoutineCall,kdMakeDir]
+]
+
+[RoutineDef,kdDel,
+	[If,[FileExists,kdTmp],
+		[VarSet,kdErr,[FileExecute,kdZFU,"FileDelete",kdTmp]]
+	]
+]
+
+// launch KMDecimate.exe with the file kdTmp (job.txt)
+[RoutineDef,kdLaunch,
+	[MemDelete,kdExeM]
+	[MemCreate,kdExeM,1024,0]
+	[MemWriteString,kdExeM,[FileNameResolvePath,kdExe]]
+	[FileExecute,kdZFU,"LaunchAppWithFile",kdTmp,,kdExeM]
+	[MemDelete,kdExeM]
+]
+
+// kdLine + CRLF -> job memory block
+[RoutineDef,kdAdd,
+	[VarSet,kdLen,[StrLength,kdLine]]
+	[If,kdLen>0,
+		[MemWriteString,kdJobM,kdLine,kdWPos,0]
+		[VarSet,kdWPos,kdWPos+kdLen]
+	]
+	[MemWriteString,kdJobM,kdNL,kdWPos,0]
+	[VarSet,kdWPos,kdWPos+2]
+]
+
+// active subtool name without the trailing dot of ItemInfo
+[RoutineDef,kdGetName,
+	[VarSet,kdName,[IGetTitle,Tool:ItemInfo]]
+	[VarSet,kdName,[StrExtract,kdName,0,[StrLength,kdName]-2]]
+]
+
+[RoutineDef,kdCheckTool,
+	[VarSet,kdOK,1]
+	[If,(![IExists,Tool:SubTool])||(![IExists,Tool:Geometry:SDiv]),
+		[VarSet,kdOK,0]
+		[VarSet,kdMsg,"KM Decimate: select an editable PolyMesh3D subtool first."][VarSet,kdLI,10][RoutineCall,kdText]
+		[Note,kdMsg,,2]
+	]
+]
+
+// the switches can stay disabled after a button ran (ZBrush 2024): enable them again
+[RoutineDef,kdEnableUI,
+	[If,[IExists,"Zplugin:KM Decimate:Keep Groups"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Groups"]==0,[IEnable,"Zplugin:KM Decimate:Keep Groups"]]]
+	[If,[IExists,"Zplugin:KM Decimate:Keep Original"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Original"]==0,[IEnable,"Zplugin:KM Decimate:Keep Original"]]]
+]
+
+// ---------------------------------------------------------------- import / export preferences: no flips both ways during the round trip
+[RoutineDef,kdPrefsSet,
+	[VarSet,kdTexOn,0]
+	[If,[IExists,"Tool:Texture Map:Texture On"],[VarSet,kdTexOn,[IGet,"Tool:Texture Map:Texture On"]][ISet,"Tool:Texture Map:Texture On",0]]
+	[If,[IExists,Preferences:ImportExport:eFlipX],[VarSet,kdEP(0),[IGet,Preferences:ImportExport:eFlipX]][ISet,Preferences:ImportExport:eFlipX,0]]
+	[If,[IExists,Preferences:ImportExport:eFlipY],[VarSet,kdEP(1),[IGet,Preferences:ImportExport:eFlipY]][ISet,Preferences:ImportExport:eFlipY,0]]
+	[If,[IExists,Preferences:ImportExport:eFlipZ],[VarSet,kdEP(2),[IGet,Preferences:ImportExport:eFlipZ]][ISet,Preferences:ImportExport:eFlipZ,0]]
+	[If,[IExists,Preferences:ImportExport:eSwitchYZ],[VarSet,kdEP(3),[IGet,Preferences:ImportExport:eSwitchYZ]][ISet,Preferences:ImportExport:eSwitchYZ,0]]
+	[If,[IExists,Preferences:ImportExport:eFlipNormals],[VarSet,kdEP(4),[IGet,Preferences:ImportExport:eFlipNormals]][ISet,Preferences:ImportExport:eFlipNormals,0]]
+	[If,[IExists,Preferences:ImportExport:iFlipX],[VarSet,kdEP(5),[IGet,Preferences:ImportExport:iFlipX]][ISet,Preferences:ImportExport:iFlipX,0]]
+	[If,[IExists,Preferences:ImportExport:iFlipY],[VarSet,kdEP(6),[IGet,Preferences:ImportExport:iFlipY]][ISet,Preferences:ImportExport:iFlipY,0]]
+	[If,[IExists,Preferences:ImportExport:iFlipZ],[VarSet,kdEP(7),[IGet,Preferences:ImportExport:iFlipZ]][ISet,Preferences:ImportExport:iFlipZ,0]]
+	[If,[IExists,Preferences:ImportExport:iSwitchYZ],[VarSet,kdEP(8),[IGet,Preferences:ImportExport:iSwitchYZ]][ISet,Preferences:ImportExport:iSwitchYZ,0]]
+	[If,[IExists,Preferences:ImportExport:iFlipNormals],[VarSet,kdEP(9),[IGet,Preferences:ImportExport:iFlipNormals]][ISet,Preferences:ImportExport:iFlipNormals,0]]
+	[If,[IExists,"Preferences:ImportExport:Detect FilpSwitch Mode"],[VarSet,kdEP(10),[IGet,"Preferences:ImportExport:Detect FilpSwitch Mode"]][ISet,"Preferences:ImportExport:Detect FilpSwitch Mode",0]]
+	[If,[IExists,"Preferences:ImportExport:Import PolyGroups"],[VarSet,kdEP(11),[IGet,"Preferences:ImportExport:Import PolyGroups"]][ISet,"Preferences:ImportExport:Import PolyGroups",1]]
+]
+
+[RoutineDef,kdPrefsRestore,
+	[If,[IExists,"Tool:Texture Map:Texture On"],[ISet,"Tool:Texture Map:Texture On",kdTexOn]]
+	[If,[IExists,Preferences:ImportExport:eFlipX],[ISet,Preferences:ImportExport:eFlipX,kdEP(0)]]
+	[If,[IExists,Preferences:ImportExport:eFlipY],[ISet,Preferences:ImportExport:eFlipY,kdEP(1)]]
+	[If,[IExists,Preferences:ImportExport:eFlipZ],[ISet,Preferences:ImportExport:eFlipZ,kdEP(2)]]
+	[If,[IExists,Preferences:ImportExport:eSwitchYZ],[ISet,Preferences:ImportExport:eSwitchYZ,kdEP(3)]]
+	[If,[IExists,Preferences:ImportExport:eFlipNormals],[ISet,Preferences:ImportExport:eFlipNormals,kdEP(4)]]
+	[If,[IExists,Preferences:ImportExport:iFlipX],[ISet,Preferences:ImportExport:iFlipX,kdEP(5)]]
+	[If,[IExists,Preferences:ImportExport:iFlipY],[ISet,Preferences:ImportExport:iFlipY,kdEP(6)]]
+	[If,[IExists,Preferences:ImportExport:iFlipZ],[ISet,Preferences:ImportExport:iFlipZ,kdEP(7)]]
+	[If,[IExists,Preferences:ImportExport:iSwitchYZ],[ISet,Preferences:ImportExport:iSwitchYZ,kdEP(8)]]
+	[If,[IExists,Preferences:ImportExport:iFlipNormals],[ISet,Preferences:ImportExport:iFlipNormals,kdEP(9)]]
+	[If,[IExists,"Preferences:ImportExport:Detect FilpSwitch Mode"],[ISet,"Preferences:ImportExport:Detect FilpSwitch Mode",kdEP(10)]]
+	[If,[IExists,"Preferences:ImportExport:Import PolyGroups"],[ISet,"Preferences:ImportExport:Import PolyGroups",kdEP(11)]]
+]
+
+// ---------------------------------------------------------------- subtool copy, export, import
+// duplicate the active subtool and make the copy active (a closed folder is opened around the duplicate, as ZCY does)
+[RoutineDef,kdDuplicate,
+	[VarSet,kdIdx,[SubToolGetActiveIndex]]
+	[VarSet,kdCF,[SubToolGetFolderIndex]]
+	[If,[SubToolGetStatus,kdCF]&1024==1024,[VarSet,kdOpen,0],[VarSet,kdOpen,1]]
+	[If,(kdCF>-1)&&(kdOpen==0),[SubToolSetStatus,kdCF,[SubToolGetStatus,kdCF]+0x400]]
+	[IPress,Tool:SubTool:Duplicate]
+	[If,(kdCF>-1)&&(kdOpen==0),[SubToolSetStatus,kdCF,[SubToolGetStatus,kdCF]-0x400]]
+	[If,[SubToolGetActiveIndex]==kdIdx,[SubToolSelect,kdIdx+1]]
+]
+
+// the GoZ template lists the records to write: points, faces, polypaint, groups (no UV / mask / crease)
+[RoutineDef,kdExport,
+	[MemDelete,kdTplM]
+	[MemCreateFromFile,kdTplM,[FileNameResolvePath,kdTpl]]
+	[MemResize,kdTplM,[MemGetSize,kdTplM]+20,0]
+	[FileNameSetNext,kdGoz,MemBlock:kdTplM]
+	[IPress,Tool:Export]
+	[MemDelete,kdTplM]
+]
+
+// Tool:Import may re-unify the export scale / offset of the tool: put them back and import again (as the GoZ plugin does)
+[RoutineDef,kdImport,
+	[If,[IExists,Tool:Export:Scale],
+		[VarSet,kdSc(0),[IGet,Tool:Export:Scale]]
+		[VarSet,kdSc(1),[IGet,"Tool:Export:X Offset"]]
+		[VarSet,kdSc(2),[IGet,"Tool:Export:Y Offset"]]
+		[VarSet,kdSc(3),[IGet,"Tool:Export:Z Offset"]]
+	]
+	[FileNameSetNext,kdRes]
+	[IPress,Tool:Import]
+	[If,[IExists,Tool:Export:Scale],
+		[VarSet,kdReimp,0]
+		[If,kdSc(0)!=[IGet,Tool:Export:Scale],[VarSet,kdReimp,1]]
+		[If,kdSc(1)!=[IGet,"Tool:Export:X Offset"],[VarSet,kdReimp,1]]
+		[If,kdSc(2)!=[IGet,"Tool:Export:Y Offset"],[VarSet,kdReimp,1]]
+		[If,kdSc(3)!=[IGet,"Tool:Export:Z Offset"],[VarSet,kdReimp,1]]
+		[If,kdReimp,
+			[ISet,Tool:Export:Scale,kdSc(0)]
+			[ISet,"Tool:Export:X Offset",kdSc(1)]
+			[ISet,"Tool:Export:Y Offset",kdSc(2)]
+			[ISet,"Tool:Export:Z Offset",kdSc(3)]
+			[FileNameSetNext,kdRes]
+			[IPress,Tool:Import]
+		]
+	]
+]
+
+// name the result: <original name>_KM<percent>
+[RoutineDef,kdRename,
+	[VarSet,kdName2,[StrMerge,kdName,"_KM",kdSet(0)]]
+	[FileExecute,kdZFU,"RenameSetNext",kdName2]
+	[IPress,Tool:SubTool:Rename]
+]
+
+// job.txt (ASCII lines): KMDEC1 / in.GoZ / out.GoZ / percent / keep groups / threads / END
+[RoutineDef,kdWriteJob,
+	[MemDelete,kdJobM]
+	[MemCreate,kdJobM,4096,0]
+	[VarSet,kdWPos,0]
+	[VarSet,kdLine,"KMDEC1"][RoutineCall,kdAdd]
+	[VarSet,kdLine,kdGoz][RoutineCall,kdAdd]
+	[VarSet,kdLine,kdRes][RoutineCall,kdAdd]
+	[VarSet,kdLine,[StrMerge,kdSet(0),""]][RoutineCall,kdAdd]
+	[VarSet,kdLine,[StrMerge,kdSet(1),""]][RoutineCall,kdAdd]
+	[VarSet,kdLine,[StrMerge,kdSet(3),""]][RoutineCall,kdAdd]
+	[VarSet,kdLine,"END"][RoutineCall,kdAdd]
+	[MemResize,kdJobM,kdWPos]
+	[MemSaveToFile,kdJobM,[StrMerge,kdWork,"job.txt"],1]
+	[MemDelete,kdJobM]
+]
+
+// wait for status.txt written by KMDecimate.exe (up to about 10 minutes)
+[RoutineDef,kdWait,
+	[VarSet,kdStat,""]
+	[VarSet,kdTmp,[StrMerge,kdWork,"status.txt"]]
+	[Loop,30000,
+		[If,[FileExists,kdTmp],
+			[MemDelete,kdStM]
+			[MemCreateFromFile,kdStM,kdTmp]
+			[MemReadString,kdStM,kdStat]
+			[MemDelete,kdStM]
+			[LoopExit]
+		]
+		[Delay,0.02]
+	]
+]
+
+// note.txt of the exe + how long export / import took
+[RoutineDef,kdShowNote,
+	[VarSet,kdMsg,"KM Decimate: no answer from KMDecimate.exe (see C:\Users\Public\KMDecimate\work\log.txt)"][VarSet,kdLI,11][RoutineCall,kdText]
+	[VarSet,kdTmp,[StrMerge,kdWork,"note.txt"]]
+	[If,[FileExists,kdTmp],
+		[MemDelete,kdNtM]
+		[MemCreateFromFile,kdNtM,kdTmp]
+		[MemReadString,kdNtM,kdMsg]
+		[MemDelete,kdNtM]
+	]
+	[VarSet,kdLI,13][VarSet,kdTip,kdW1][RoutineCall,kdTipOf][VarSet,kdW1,kdTip]
+	[VarSet,kdLI,14][VarSet,kdTip,kdW2][RoutineCall,kdTipOf][VarSet,kdW2,kdTip]
+	[VarSet,kdLI,15][VarSet,kdTip,kdW3][RoutineCall,kdTipOf][VarSet,kdW3,kdTip]
+	[VarSet,kdD1,INT((kdT1-kdT0)*100)/100]
+	[VarSet,kdD2,INT((kdT3-kdT2)*100)/100]
+	[VarSet,kdD3,INT((kdT3-kdT0)*100)/100]
+	[VarSet,kdMsg,[StrMerge,kdMsg,kdNL,kdW1,kdD1,"s   ",kdW2,kdD2,"s   ",kdW3,kdD3,"s"]]
+	[Note,kdMsg,,6]
+]
+
+// the round trip: (duplicate) -> highest level only -> export GoZ -> KMDecimate.exe -> import the result
+[RoutineDef,kdRun,
+	[RoutineCall,kdCheckTool]
+	[If,kdOK==0,[Exit]]
+	[If,![FileExists,[FileNameResolvePath,kdZFU]],[Note,"KM Decimate: ZFileUtils64.dll is missing in ZPlugs64\KMDecimate\",,3][Exit]]
+	[If,![FileExists,[FileNameResolvePath,kdExe]],[Note,"KM Decimate: KMDecimate.exe is missing in ZPlugs64\KMDecimate\",,3][Exit]]
+	[If,![FileExists,[FileNameResolvePath,kdTpl]],[Note,"KM Decimate: KMDecimate.GoZ is missing in ZPlugs64\KMDecimate\",,3][Exit]]
+	[RoutineCall,kdEnsureDirs]
+	[RoutineCall,kdGetName]
+	[VarSet,kdTmp,kdGoz][RoutineCall,kdDel]
+	[VarSet,kdTmp,kdRes][RoutineCall,kdDel]
+	[VarSet,kdTmp,[StrMerge,kdWork,"status.txt"]][RoutineCall,kdDel]
+	[VarSet,kdTmp,[StrMerge,kdWork,"note.txt"]][RoutineCall,kdDel]
+	[VarSet,kdStat,""]
+	// a subtool with subdivision levels is always decimated as a copy (deleting its lower levels in place is not undoable)
+	[VarSet,kdCopy,kdSet(2)]
+	[If,[IGetMax,Tool:Geometry:SDiv]>1,[VarSet,kdCopy,1]]
+	[VarSet,kdT0,[ZBrushInfo,2]]
+	[RoutineCall,kdPrefsSet]
+	[IFreeze,
+		[If,kdCopy,[RoutineCall,kdDuplicate]]
+		[If,[IGet,Tool:Geometry:SDiv]<[IGetMax,Tool:Geometry:SDiv],[ISet,Tool:Geometry:SDiv,[IGetMax,Tool:Geometry:SDiv]]]
+		[If,kdCopy,[If,[IGetStatus,"Tool:Geometry:Del Lower"],[IPress,"Tool:Geometry:Del Lower"]]]
+		[RoutineCall,kdExport]
+	]
+	[VarSet,kdT1,[ZBrushInfo,2]]
+	[VarSet,kdT2,kdT1]
+	[VarSet,kdT3,kdT1]
+	[If,[FileExists,kdGoz],
+		[RoutineCall,kdWriteJob]
+		[VarSet,kdTmp,[StrMerge,kdWork,"job.txt"]]
+		[RoutineCall,kdLaunch]
+		[RoutineCall,kdWait]
+		[VarSet,kdT2,[ZBrushInfo,2]]
+		[If,([StrLength,kdStat]>0)&&([StrFind,"1",kdStat]==0)&&[FileExists,kdRes],
+			[IFreeze,
+				[RoutineCall,kdImport]
+				[If,kdCopy,[RoutineCall,kdRename]]
+			]
+		]
+		[VarSet,kdT3,[ZBrushInfo,2]]
+	]
+	[RoutineCall,kdPrefsRestore]
+	[If,[FileExists,kdGoz],
+		[RoutineCall,kdShowNote],
+		[VarSet,kdMsg,"KM Decimate: the GoZ export failed."][VarSet,kdLI,12][RoutineCall,kdText]
+		[Note,kdMsg,,3]
+	]
+	[VarSet,kdTmp,kdGoz][RoutineCall,kdDel]
+	[VarSet,kdTmp,kdRes][RoutineCall,kdDel]
+	[RoutineCall,kdEnableUI]
+]
+
+// ---------------------------------------------------------------- interface
+[VarSet,kdTip,"Decimate the active subtool. With Keep Original on, a copy is decimated and placed below it (name ends with _KM and the percent)"][VarSet,kdLI,0][RoutineCall,kdTipOf]
+[IButton,"Zplugin:KM Decimate:Decimate",kdTip,
+	[RoutineCall,kdRun]
+,0,1,,,32]
+
+[VarSet,kdTip,"Percent of the triangles to keep (10 = one tenth)"][VarSet,kdLI,1][RoutineCall,kdTipOf]
+[ISlider,"Zplugin:KM Decimate:Percent",kdSet(0),0.1,0.1,100,kdTip,
+	[VarSet,kdSet(0),[IGet,"Zplugin:KM Decimate:Percent"]][RoutineCall,kdSave]
+,0,1]
+
+[VarSet,kdTip,"Keep polygroup borders in place"][VarSet,kdLI,2][RoutineCall,kdTipOf]
+[ISwitch,"Zplugin:KM Decimate:Keep Groups",kdSet(1),kdTip,
+	[VarSet,kdSet(1),1][RoutineCall,kdSave],
+	[VarSet,kdSet(1),0][RoutineCall,kdSave]
+,0,0.5]
+
+[VarSet,kdTip,"On: decimate a copy and keep the original. Off: decimate the subtool itself (a subtool with subdivision levels is always copied)"][VarSet,kdLI,3][RoutineCall,kdTipOf]
+[ISwitch,"Zplugin:KM Decimate:Keep Original",kdSet(2),kdTip,
+	[VarSet,kdSet(2),1][RoutineCall,kdSave],
+	[VarSet,kdSet(2),0][RoutineCall,kdSave]
+,0,0.5]
+
+[VarSet,kdTip,"KM Decimate 0.1"][VarSet,kdLI,4][RoutineCall,kdTipOf]
+[IButton,"Zplugin:KM Decimate:About",kdTip,
+	[VarSet,kdMsg,"KM Decimate 0.1 - multi-threaded QEM decimation (prototype). Log: C:\Users\Public\KMDecimate\work\log.txt"][VarSet,kdLI,16][RoutineCall,kdText]
+	[Note,kdMsg,,4]
+,0,1]
+
+// ---------------------------------------------------------------- Chinese labels
+[RoutineDef,kdApplyLang,
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Decimate"][VarSet,kdLI,0][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Percent"][VarSet,kdLI,1][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Groups"][VarSet,kdLI,2][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Original"][VarSet,kdLI,3][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:About"][VarSet,kdLI,4][RoutineCall,kdLabel]
+]
+[RoutineCall,kdApplyLang]
