@@ -31,11 +31,23 @@
 
 还不支持：UV 不保留（OBJ 里的 vt 被忽略）；Polypaint 只是沿边插值，没有做颜色误差；polygroup 边界默认不保护（`--groups 10` 可以打开）；遮罩不保留。
 
-## ZBrush 插件（0.1）
+## ZBrush 插件（0.2）
 
 面板：Zplugin > KM Decimate（按钮显示中文）。
 - **减面**：默认先复制当前子工具，再在副本上删掉低细分级、减面，结果放在原物体下面，名字是 `原名_KM百分比`。弹窗显示导出、计算、导入各用了几秒。
 - **保留百分比**：0.1–100。**保留组边界**：默认开。**保留原物体**：关掉时直接减当前子工具（有细分级时仍然复制，因为原地删低级别没法撤销）。
+
+### 重拓扑并投射（0.2 新增）
+
+一个按钮完成：把当前状态存为历史 → ZRemesher 到目标面数 → 自动细分 → 每一级都把原来的细节投射回来。
+
+- **目标多边形数**：ZRemesher 的目标，单位千（5 = 5000），用完会把 ZBrush 自己的 Target Polygons Count 改回去。ZRemesher 的其他选项（KeepGroups、Adapt、AdaptiveSize……）沿用 Tool > Geometry > ZRemesher 里的设置。
+- **细分级数**：0 = 自动，选让最高级面数最接近目标的级数（每细分一次面数 ×4，超过目标一半就多细分一级），最多 8 级；1–8 = 固定细分这么多级。
+- **目标面数（万）**：自动细分时要接近的总面数；0 = 接近原模型最高级的面数。
+- **用历史投射**（关，默认）：先复制当前子工具当作“历史”，原模型是投射源，副本做 ZRemesher、细分，每级用 ProjectAll 投射。投射时临时隐藏其他子工具，结束后恢复。投射参数（Dist、Mean、PA Blur、Farthest 等）沿用 Tool > SubTool > Project 里的设置。
+  - 开着“保留原物体”：原模型保留并隐藏，结果叫 `原名_ZR`；关掉：投射完删掉原模型，结果改回原名。原模型是文件夹的第一个子工具时不删，因为可能把文件夹一起删掉。
+- **用历史投射**（开）：原地操作，用 ZBrush 自带的 Project History（Project Undo History）逐级投射。ZScript 没法自己记录历史点，所以按按钮前要先在时间轴上 **Ctrl+点击** 当前状态。不复制，省内存，但不能保留原物体。
+- **进度和取消**：计算时 ZBrush 底部的进度条显示“读取 / 准备 / 正在减面 xx% / 写出”。这时在 ZBrush 里按 **Esc** 取消，exe 在 0.2–0.5 秒内停下，复制出来的副本会被删掉，模型不变。ZScript 在等待时读不到按键，所以 Esc 由 exe 检测：用 `GetAsyncKeyState`，只在前台是 ZBrush（或 ZBrush“未响应”时的 Ghost 窗口）时才算。exe 每 0.1 秒写一次 `work\progress.bin`（3 个 float：阶段、比例、心跳）。不再有固定的 10 分钟超时，改成心跳 30 秒不动才放弃，第一次心跳前最多等 2 分钟，因为安全软件可能会拦新 exe。导出和导入是 ZBrush 自己在做，只能显示提示，取消不了。测试取消可以设环境变量 `KMDEC_TEST_CANCEL=秒数`。
 - 流程：ZScript 导出 GoZ 到 `C:\Users\Public\KMDecimate\work\in.GoZ` → `KMDecimate.exe job.txt` → 写 `out.GoZ` + `status.txt` + `note.txt` → ZScript 导入。日志 `work\log.txt`。
 - 组装与安装：先 `build.ps1`，再 `py -3 tools/package.py --install`（默认装到 `F:\Zbrush Assest\ZStartup\ZPlugs64` 和 `F:\art software\zbrush 2024.0.4\ZStartup\ZPlugs64`）。改 ZScript 后 package.py 会先跑 `tools/zscript_lint.py`。
 - 第一次需要在 ZBrush 里 ZScript > Load 选 `ZPlugs64\KMDecimate.txt`，之后 ZBrush 启动会自动编译。

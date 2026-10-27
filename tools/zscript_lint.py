@@ -18,6 +18,7 @@ KNOWN = {
     "FileNameSetNext", "FileExecute", "MemCreate", "MemDelete", "MemWriteString", "MemReadString", "MemCopy",
     "MemSaveToFile", "MemCreateFromFile", "MemGetSize", "MemResize", "ZBrushInfo", "MemRead", "IColorSet",
     "IGetStatus", "IEnable", "SubToolGetActiveIndex", "SubToolGetFolderIndex", "SubToolGetStatus", "SubToolSetStatus", "SubToolSelect",
+    "SubToolGetCount", "IKeyPress", "Mesh3DGet",
 }
 MEM_CMDS = {"MemCreate", "MemDelete", "MemWriteString", "MemReadString", "MemSaveToFile", "MemCreateFromFile",
             "MemGetSize", "MemResize", "MemRead"}

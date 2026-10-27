@@ -9,8 +9,66 @@ static void usage() {
            "  --threads 1 = 经典单线程 QEM（对照组）；默认用全部逻辑核\n");
 }
 
+// 前台窗口属于 ZBrush（或者是 ZBrush“没有响应”时 Windows 换上的 Ghost 窗口）：这时按的 Esc 才算取消
+static bool zbrushInFront() {
+    HWND h = GetForegroundWindow();
+    if (!h) return false;
+    wchar_t cls[64] = {};
+    GetClassNameW(h, cls, 64);
+    if (wcscmp(cls, L"Ghost") == 0) return true;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (pid == GetCurrentProcessId()) return true;
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return false;
+    wchar_t path[MAX_PATH] = {};
+    DWORD n = MAX_PATH;
+    bool zb = QueryFullProcessImageNameW(p, 0, path, &n) && n >= 10 && _wcsicmp(path + n - 10, L"zbrush.exe") == 0;
+    CloseHandle(p);
+    return zb;
+}
+
+// 监视线程：每 0.1 秒写一次 progress.bin（3 个 float：阶段 0 读 / 1 减面 / 2 写，完成比例 0–1，心跳计数），
+// ZBrush 的 ZScript 读它显示进度条，心跳不动了就知道 exe 出事了。ZBrush 在前台时按 Esc → kmd::gCancel
+struct Monitor {
+    std::wstring dir;
+    std::atomic<int> stage{0};
+    std::atomic<size_t> toRemove{1};
+    std::atomic<bool> done{false};
+    std::thread th;
+    explicit Monitor(const std::wstring& d) : dir(d) {
+        GetAsyncKeyState(VK_ESCAPE);  // 忘掉点按钮之前按过的 Esc
+        // 测试用：环境变量 KMDEC_TEST_CANCEL=秒数，到时间就当作按了 Esc
+        const wchar_t* tc = _wgetenv(L"KMDEC_TEST_CANCEL");
+        double cancelAt = tc ? _wtof(tc) : -1;
+        th = std::thread([this, cancelAt] {
+            float tick = 0;
+            auto t0 = kmd::Clock::now();
+            while (!done.load()) {
+                if ((GetAsyncKeyState(VK_ESCAPE) & 0x8001) && zbrushInFront()) kmd::gCancel = true;
+                if (cancelAt >= 0 && kmd::secs(t0) >= cancelAt) kmd::gCancel = true;
+                int s = stage.load();
+                double frac = s == 0 ? 0 : s == 2 ? 1 : std::min(1.0, double(kmd::gRemoved.load()) / double(std::max<size_t>(1, toRemove.load())));
+                float rec[3] = {float(s), float(frac), tick += 1};
+                std::wstring tmp = dir + L"progress.tmp", dst = dir + L"progress.bin";
+                if (FILE* f = _wfopen(tmp.c_str(), L"wb")) {
+                    fwrite(rec, sizeof rec, 1, f);
+                    fclose(f);
+                    MoveFileExW(tmp.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING);  // 整个换掉，ZBrush 读不到写了一半的文件
+                }
+                Sleep(100);
+            }
+        });
+    }
+    ~Monitor() {
+        done = true;
+        th.join();
+    }
+};
+
 // ZBrush 插件调用：参数只有一个 job.txt（ASCII 行：KMDEC1 / 输入 / 输出 / 百分比 / 保留组 / 线程数 / END）。
-// 同目录写 status.txt（1 成功，9 失败）、note.txt（给 ZBrush 显示的 UTF-8 消息），并追加 log.txt。
+// 同目录写 status.txt（1 成功，8 已取消，9 失败）、note.txt（给 ZBrush 显示的 UTF-8 消息），并追加 log.txt；
+// 计算期间写 progress.bin（见 Monitor）。
 static int runJob(const std::wstring& jobPath) {
     std::wstring dir = jobPath.substr(0, jobPath.find_last_of(L"\\/") + 1);
     auto finish = [&](const char* status, const std::string& note, const std::string& log) {
@@ -19,6 +77,9 @@ static int runJob(const std::wstring& jobPath) {
         if (f) { fwrite(log.data(), 1, log.size(), f); fclose(f); }
         writeAll(dir + L"status.txt", status);  // 最后写，ZBrush 一看到它就去读结果
     };
+    kmd::gRemoved = 0;
+    kmd::gCancel = false;
+    Monitor mon(dir);
     try {
         auto buf = readAll(jobPath);
         std::vector<std::string> L;
@@ -40,11 +101,16 @@ static int runJob(const std::wstring& jobPath) {
         Mesh m = loadMesh(in);
         double tLoad = kmd::secs(t0);
         if (m.nt() == 0) throw std::runtime_error("导出的模型是空的");
+        if (kmd::gCancel) throw kmd::Cancelled();
         o.targetTris = size_t(std::max(4.0, m.nt() * percent / 100));
+        mon.toRemove = m.nt() > o.targetTris ? m.nt() - o.targetTris : 1;
+        mon.stage = 1;
         DecimateStats st;
         auto t1 = kmd::Clock::now();
         Mesh r = decimate(m, o, st);
         double tDec = kmd::secs(t1);
+        if (kmd::gCancel) throw kmd::Cancelled();
+        mon.stage = 2;
         auto t2 = kmd::Clock::now();
         saveMesh(out, r);
         double tSave = kmd::secs(t2);
@@ -55,6 +121,9 @@ static int runJob(const std::wstring& jobPath) {
                  L[1].c_str(), percent, o.groupWeight > 0, m.nt(), r.nt(), tLoad, tDec, tSave, st.passes.size(), st.threads);
         finish("1", note, log);
         return 0;
+    } catch (kmd::Cancelled&) {
+        finish("8", "KM 减面：已取消（按了 Esc），模型没有改动。", "cancelled\r\n");
+        return 3;
     } catch (std::exception& e) {
         std::string msg = std::string("KM 减面出错：") + e.what();
         finish("9", msg, msg + "\r\n");

@@ -1,4 +1,5 @@
-// KM Decimate 0.1 - fast multi-threaded decimation (prototype, to compare with Decimation Master)
+// KM Decimate 0.2 - fast multi-threaded decimation (prototype, to compare with Decimation Master)
+// plus ZRemesh Project: keep the current state as history, ZRemesher to a target, subdivide, project the details back
 // ZBrush 2024 / 2026, ZScript only. Install: copy KMDecimate.txt and the KMDecimate folder into ZStartup\ZPlugs64.
 // ZBrush exports the subtool as GoZ, KMDecimate\KMDecimate.exe decimates it and writes a GoZ back, ZBrush imports it.
 // By default the active subtool is duplicated first and only the copy is decimated (name gets _KM<percent>).
@@ -56,6 +57,58 @@
 [VarSet,kdSet(3),0]
 [If,[FileExists,kdSetPath],[VarLoad,kdSet,kdSetPath]]
 
+// remesh settings (own file, so an older settings.zvr still loads):
+// 0 ZRemesher target polygons (thousands)  1 subdivision levels (0 = auto)  2 target faces in units of 10000 (0 = like the original)  3 use Project History
+[VarDef,kdSet2Path,"C:\Users\Public\KMDecimate\remesh.zvr"]
+[VarDef,kdSet2(4),0]
+[VarSet,kdSet2(0),5]
+[VarSet,kdSet2(1),0]
+[VarSet,kdSet2(2),0]
+[VarSet,kdSet2(3),0]
+[If,[FileExists,kdSet2Path],[VarLoad,kdSet2,kdSet2Path]]
+
+// remesh state: source / result subtool, face counts (original, after ZRemesher, final), levels, saved UI values
+[VarDef,kdSrc,0]
+[VarDef,kdDst,0]
+[VarDef,kdP,0]
+[VarDef,kdR,0]
+[VarDef,kdF,0]
+[VarDef,kdL,0]
+[VarDef,kdN,0]
+[VarDef,kdCnt,0]
+[VarDef,kdTarget,0]
+[VarDef,kdTPC,0]
+[VarDef,kdSolo,0]
+[VarDef,kdZOK,0]
+[VarDef,kdKept,0]
+[VarDef,kdSt(1024),0]
+[VarDef,kdHid(1024),0]
+[VarDef,kdW17,"KM Remesh: "]
+[VarDef,kdW18," faces after ZRemesher, "]
+[VarDef,kdW19," subdivision levels, top level "]
+[VarDef,kdW20," faces (original "]
+[VarDef,kdW21,"), time "]
+
+// progress: KMDecimate.exe rewrites work\progress.bin every 0.1 s with 3 floats (stage 0 read / 1 decimate / 2 write, fraction, heartbeat)
+[VarDef,kdPrg,"C:\Users\Public\KMDecimate\work\progress.bin"]
+[VarDef,kdPS,0]
+[VarDef,kdPF,0]
+[VarDef,kdPT,0]
+[VarDef,kdPLast,0]
+[VarDef,kdIdle,0]
+[VarDef,kdCanc,0]
+[VarDef,kdWS,""]
+[VarDef,kdWLoad,"Reading the mesh... "]
+[VarDef,kdWPrep,"Preparing... "]
+[VarDef,kdWDec,"Decimating "]
+[VarDef,kdWSave,"Writing the result... "]
+[VarDef,kdWEsc,"    (Esc cancels)"]
+[VarDef,kdWExp,"Exporting (ZBrush is busy, this step cannot be cancelled)..."]
+[VarDef,kdWImp,"Importing (ZBrush is busy)..."]
+[VarDef,kdWZR,"ZRemesher..."]
+[VarDef,kdWDiv,"Subdivide and project "]
+[VarDef,kdWordsOK,0]
+
 // ---------------------------------------------------------------- language: fixed 256 byte records (key 32 | label 64 | tip 160), UTF-8
 [VarDef,kdLangOK,0]
 [VarDef,kdLI,0]
@@ -108,6 +161,11 @@
 	]
 ]
 
+// delete the active subtool without the confirmation dialog (as ZCY does)
+[RoutineDef,kdDelete,
+	[IKeyPress,'9',[IPress,Tool:SubTool:Delete]]
+]
+
 // launch KMDecimate.exe with the file kdTmp (job.txt)
 [RoutineDef,kdLaunch,
 	[MemDelete,kdExeM]
@@ -147,6 +205,7 @@
 [RoutineDef,kdEnableUI,
 	[If,[IExists,"Zplugin:KM Decimate:Keep Groups"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Groups"]==0,[IEnable,"Zplugin:KM Decimate:Keep Groups"]]]
 	[If,[IExists,"Zplugin:KM Decimate:Keep Original"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Original"]==0,[IEnable,"Zplugin:KM Decimate:Keep Original"]]]
+	[If,[IExists,"Zplugin:KM Decimate:Use History"],[If,[IGetStatus,"Zplugin:KM Decimate:Use History"]==0,[IEnable,"Zplugin:KM Decimate:Use History"]]]
 ]
 
 // ---------------------------------------------------------------- import / export preferences: no flips both ways during the round trip
@@ -256,11 +315,34 @@
 	[MemDelete,kdJobM]
 ]
 
-// wait for status.txt written by KMDecimate.exe (up to about 10 minutes)
+// note bar words in the current language (read once)
+[RoutineDef,kdWords,
+	[If,kdWordsOK==0,
+		[VarSet,kdLI,24][VarSet,kdTip,kdWLoad][RoutineCall,kdTipOf][VarSet,kdWLoad,kdTip]
+		[VarSet,kdLI,25][VarSet,kdTip,kdWPrep][RoutineCall,kdTipOf][VarSet,kdWPrep,kdTip]
+		[VarSet,kdLI,26][VarSet,kdTip,kdWDec][RoutineCall,kdTipOf][VarSet,kdWDec,kdTip]
+		[VarSet,kdLI,27][VarSet,kdTip,kdWSave][RoutineCall,kdTipOf][VarSet,kdWSave,kdTip]
+		[VarSet,kdLI,28][VarSet,kdTip,kdWEsc][RoutineCall,kdTipOf][VarSet,kdWEsc,kdTip]
+		[VarSet,kdLI,29][VarSet,kdTip,kdWExp][RoutineCall,kdTipOf][VarSet,kdWExp,kdTip]
+		[VarSet,kdLI,30][VarSet,kdTip,kdWImp][RoutineCall,kdTipOf][VarSet,kdWImp,kdTip]
+		[VarSet,kdLI,31][VarSet,kdTip,kdWZR][RoutineCall,kdTipOf][VarSet,kdWZR,kdTip]
+		[VarSet,kdLI,32][VarSet,kdTip,kdWDiv][RoutineCall,kdTipOf][VarSet,kdWDiv,kdTip]
+		[VarSet,kdWordsOK,1]
+	]
+]
+
+// wait for status.txt written by KMDecimate.exe; meanwhile progress.bin drives the note bar (Esc is caught by the exe:
+// ZScript cannot read keys while it waits). No fixed time limit: give up when the heartbeat stops for about 30 s
+// (2 minutes before the first one, because an antivirus may hold a freshly installed exe)
 [RoutineDef,kdWait,
 	[VarSet,kdStat,""]
 	[VarSet,kdTmp,[StrMerge,kdWork,"status.txt"]]
-	[Loop,30000,
+	[VarSet,kdPLast,-1]
+	[VarSet,kdPT,-1]
+	[VarSet,kdPS,0]
+	[VarSet,kdPF,0]
+	[VarSet,kdIdle,0]
+	[Loop,1000000,
 		[If,[FileExists,kdTmp],
 			[MemDelete,kdStM]
 			[MemCreateFromFile,kdStM,kdTmp]
@@ -268,8 +350,32 @@
 			[MemDelete,kdStM]
 			[LoopExit]
 		]
-		[Delay,0.02]
+		[If,[FileExists,kdPrg],
+			[MemDelete,kdPrM]
+			[MemCreateFromFile,kdPrM,kdPrg]
+			[If,[MemGetSize,kdPrM]>=12,
+				[MemRead,kdPrM,kdPS,0,0]
+				[MemRead,kdPrM,kdPF,0,4]
+				[MemRead,kdPrM,kdPT,0,8]
+			]
+			[MemDelete,kdPrM]
+		]
+		[If,kdPT!=kdPLast,[VarSet,kdPLast,kdPT][VarSet,kdIdle,0],[VarSet,kdIdle,kdIdle+1]]
+		[If,(kdPLast<0)&&(kdIdle>1200),[LoopExit]]
+		[If,(kdPLast>=0)&&(kdIdle>300),[LoopExit]]
+		[If,kdPS==1,
+			[If,kdPF>0,
+				[NoteBar,[StrMerge,kdWDec,INT(kdPF*100),"%",kdWEsc],kdPF],
+				[NoteBar,[StrMerge,kdWPrep,kdWEsc],0.01]
+			],
+			[If,kdPS==2,
+				[NoteBar,[StrMerge,kdWSave,kdWEsc],1],
+				[NoteBar,[StrMerge,kdWLoad,kdWEsc],0.01]
+			]
+		]
+		[Delay,0.1]
 	]
+	[NoteBar,""]
 ]
 
 // note.txt of the exe + how long export / import took
@@ -301,16 +407,20 @@
 	[If,![FileExists,[FileNameResolvePath,kdTpl]],[Note,"KM Decimate: KMDecimate.GoZ is missing in ZPlugs64\KMDecimate\",,3][Exit]]
 	[RoutineCall,kdEnsureDirs]
 	[RoutineCall,kdGetName]
+	[RoutineCall,kdWords]
 	[VarSet,kdTmp,kdGoz][RoutineCall,kdDel]
 	[VarSet,kdTmp,kdRes][RoutineCall,kdDel]
 	[VarSet,kdTmp,[StrMerge,kdWork,"status.txt"]][RoutineCall,kdDel]
 	[VarSet,kdTmp,[StrMerge,kdWork,"note.txt"]][RoutineCall,kdDel]
+	[VarSet,kdTmp,kdPrg][RoutineCall,kdDel]
 	[VarSet,kdStat,""]
+	[VarSet,kdCanc,0]
 	// a subtool with subdivision levels is always decimated as a copy (deleting its lower levels in place is not undoable)
 	[VarSet,kdCopy,kdSet(2)]
 	[If,[IGetMax,Tool:Geometry:SDiv]>1,[VarSet,kdCopy,1]]
 	[VarSet,kdT0,[ZBrushInfo,2]]
 	[RoutineCall,kdPrefsSet]
+	[NoteBar,kdWExp,0.01]
 	[IFreeze,
 		[If,kdCopy,[RoutineCall,kdDuplicate]]
 		[If,[IGet,Tool:Geometry:SDiv]<[IGetMax,Tool:Geometry:SDiv],[ISet,Tool:Geometry:SDiv,[IGetMax,Tool:Geometry:SDiv]]]
@@ -327,21 +437,176 @@
 		[RoutineCall,kdWait]
 		[VarSet,kdT2,[ZBrushInfo,2]]
 		[If,([StrLength,kdStat]>0)&&([StrFind,"1",kdStat]==0)&&[FileExists,kdRes],
+			[NoteBar,kdWImp,1]
 			[IFreeze,
 				[RoutineCall,kdImport]
 				[If,kdCopy,[RoutineCall,kdRename]]
 			]
+			[NoteBar,""]
+		]
+		// Esc in KMDecimate.exe: drop the copy that was made for it and go back to the original
+		[If,([StrLength,kdStat]>0)&&([StrFind,"8",kdStat]==0),
+			[VarSet,kdCanc,1]
+			[If,kdCopy,[IFreeze,[RoutineCall,kdDelete][SubToolSelect,kdIdx]]]
 		]
 		[VarSet,kdT3,[ZBrushInfo,2]]
 	]
 	[RoutineCall,kdPrefsRestore]
-	[If,[FileExists,kdGoz],
-		[RoutineCall,kdShowNote],
-		[VarSet,kdMsg,"KM Decimate: the GoZ export failed."][VarSet,kdLI,12][RoutineCall,kdText]
-		[Note,kdMsg,,3]
+	[NoteBar,""]
+	[If,kdCanc,
+		[VarSet,kdMsg,"KM Decimate: cancelled, the model was not changed."][VarSet,kdLI,33][RoutineCall,kdText]
+		[Note,kdMsg,,3],
+		[If,[FileExists,kdGoz],
+			[RoutineCall,kdShowNote],
+			[VarSet,kdMsg,"KM Decimate: the GoZ export failed."][VarSet,kdLI,12][RoutineCall,kdText]
+			[Note,kdMsg,,3]
+		]
 	]
 	[VarSet,kdTmp,kdGoz][RoutineCall,kdDel]
 	[VarSet,kdTmp,kdRes][RoutineCall,kdDel]
+	[VarSet,kdTmp,kdPrg][RoutineCall,kdDel]
+	[RoutineCall,kdEnableUI]
+]
+
+// ---------------------------------------------------------------- remesh: keep the current state as history -> ZRemesher -> subdivide -> project level by level
+// Two ways to keep the history:
+//   copy (default): duplicate the subtool; the original is the source, the copy is remeshed and gets the details with ProjectAll
+//   Project History: works in place; ZBrush projects from the history point the user stored with Ctrl+click on the timeline
+//   (ZScript cannot store that point itself)
+[RoutineDef,kdSave2,
+	[RoutineCall,kdEnsureDirs]
+	[VarSave,kdSet2,kdSet2Path]
+]
+
+// subdivision levels: fixed, or so that the top level comes closest to the target (each Divide = x4 faces)
+[RoutineDef,kdLevels,
+	[VarSet,kdTarget,kdP]
+	[If,kdSet2(2)>0,[VarSet,kdTarget,kdSet2(2)*10000]]
+	[VarSet,kdL,0]
+	[If,kdSet2(1)>0,
+		[VarSet,kdL,INT(kdSet2(1))],
+		[VarSet,kdF,kdR]
+		[Loop,8,
+			[If,(kdF>0)&&(kdF*2<kdTarget),
+				[VarSet,kdF,kdF*4]
+				[VarSet,kdL,kdL+1],
+				[LoopExit]
+			]
+		]
+	]
+]
+
+// ProjectAll projects from every visible subtool: hide all except the source and the result (statuses are put back after)
+[RoutineDef,kdHideOthers,
+	[VarSet,kdCnt,[SubToolGetCount]]
+	[If,kdCnt>1024,[VarSet,kdCnt,1024]]
+	[Loop,kdCnt,
+		[VarSet,kdHid(kdN),0]
+		[If,(kdN!=kdSrc)&&(kdN!=kdDst),
+			[VarSet,kdSt(kdN),[SubToolGetStatus,kdN]]
+			[If,kdSt(kdN)&1==1,
+				[SubToolSetStatus,kdN,kdSt(kdN)-1]
+				[VarSet,kdHid(kdN),1]
+			]
+		]
+	,kdN]
+	[If,[SubToolGetStatus,kdSrc]&1==0,[SubToolSetStatus,kdSrc,[SubToolGetStatus,kdSrc]+1]]
+]
+
+[RoutineDef,kdShowOthers,
+	[Loop,kdCnt,
+		[If,kdHid(kdN),
+			[If,[SubToolGetStatus,kdN]&1==0,[SubToolSetStatus,kdN,[SubToolGetStatus,kdN]+1]]
+		]
+	,kdN]
+]
+
+[RoutineDef,kdProject,
+	[If,kdSet2(3),
+		[IPress,"Tool:SubTool:Project History"],
+		[IPress,Tool:SubTool:ProjectAll]
+	]
+]
+
+[RoutineDef,kdRemesh,
+	[RoutineCall,kdCheckTool]
+	[If,kdOK==0,[Exit]]
+	[RoutineCall,kdGetName]
+	[RoutineCall,kdWords]
+	[VarSet,kdT0,[ZBrushInfo,2]]
+	[VarSet,kdTPC,[IGet,"Tool:Geometry:Target Polygons Count"]]
+	[VarSet,kdSolo,[IGet,Transform:Solo]]
+	[VarSet,kdKept,1]
+	// the source shows its highest level
+	[If,[IGet,Tool:Geometry:SDiv]<[IGetMax,Tool:Geometry:SDiv],[ISet,Tool:Geometry:SDiv,[IGetMax,Tool:Geometry:SDiv]]]
+	[Mesh3DGet,1,,,kdP]
+	[VarSet,kdSrc,[SubToolGetActiveIndex]]
+	[VarSet,kdDst,kdSrc]
+	[If,kdSet2(3)==0,
+		[IFreeze,[RoutineCall,kdDuplicate]]
+		[VarSet,kdDst,[SubToolGetActiveIndex]]
+	]
+	// one level only (ZRemesher needs that), then remesh to the target
+	[If,[IGetMax,Tool:Geometry:SDiv]>1,[If,[IGetStatus,"Tool:Geometry:Del Lower"],[IPress,"Tool:Geometry:Del Lower"]]]
+	[VarSet,kdZOK,0]
+	[If,[IGetStatus,Tool:Geometry:ZRemesher],
+		[NoteBar,kdWZR,0.05]
+		[ISet,"Tool:Geometry:Target Polygons Count",kdSet2(0)]
+		[IPress,Tool:Geometry:ZRemesher]
+		[ISet,"Tool:Geometry:Target Polygons Count",kdTPC]
+		[VarSet,kdZOK,1]
+	]
+	[If,kdZOK==0,
+		[NoteBar,""]
+		[If,kdSet2(3)==0,[RoutineCall,kdDelete][SubToolSelect,kdSrc]]
+		[VarSet,kdMsg,"KM Remesh: ZRemesher is not available for this subtool."][VarSet,kdLI,22][RoutineCall,kdText]
+		[Note,kdMsg,,3]
+		[RoutineCall,kdEnableUI]
+		[Exit]
+	]
+	[Mesh3DGet,1,,,kdR]
+	[RoutineCall,kdLevels]
+	[ISet,Transform:Solo,0]
+	[If,kdSet2(3)==0,[IFreeze,[RoutineCall,kdHideOthers]]]
+	[NoteBar,[StrMerge,kdWDiv,"0 / ",INT(kdL)],0.1]
+	[RoutineCall,kdProject]
+	[Loop,kdL,
+		[NoteBar,[StrMerge,kdWDiv,INT(kdN+1)," / ",INT(kdL)],0.1+0.9*(kdN+1)/(kdL+1)]
+		[IPress,Tool:Geometry:Divide]
+		[RoutineCall,kdProject]
+	,kdN]
+	[NoteBar,""]
+	[Mesh3DGet,1,,,kdF]
+	[If,kdSet2(3)==0,
+		[IFreeze,[RoutineCall,kdShowOthers]]
+		// the original is deleted only when it is not the top of a folder (deleting that could take the folder with it)
+		[If,(kdSet(2)==0)&&([SubToolGetFolderIndex,kdSrc]!=kdSrc),[VarSet,kdKept,0]]
+		[If,kdKept,
+			[If,[SubToolGetStatus,kdSrc]&1==1,[SubToolSetStatus,kdSrc,[SubToolGetStatus,kdSrc]-1]]
+			[VarSet,kdName2,[StrMerge,kdName,"_ZR"]]
+			[FileExecute,kdZFU,"RenameSetNext",kdName2]
+			[IPress,Tool:SubTool:Rename],
+			[SubToolSelect,kdSrc]
+			[RoutineCall,kdDelete]
+			[SubToolSelect,kdSrc]
+			[FileExecute,kdZFU,"RenameSetNext",kdName]
+			[IPress,Tool:SubTool:Rename]
+		]
+	]
+	[ISet,Transform:Solo,kdSolo]
+	[VarSet,kdT3,[ZBrushInfo,2]]
+	[VarSet,kdD3,INT((kdT3-kdT0)*10)/10]
+	[VarSet,kdLI,17][VarSet,kdTip,kdW17][RoutineCall,kdTipOf][VarSet,kdW17,kdTip]
+	[VarSet,kdLI,18][VarSet,kdTip,kdW18][RoutineCall,kdTipOf][VarSet,kdW18,kdTip]
+	[VarSet,kdLI,19][VarSet,kdTip,kdW19][RoutineCall,kdTipOf][VarSet,kdW19,kdTip]
+	[VarSet,kdLI,20][VarSet,kdTip,kdW20][RoutineCall,kdTipOf][VarSet,kdW20,kdTip]
+	[VarSet,kdLI,21][VarSet,kdTip,kdW21][RoutineCall,kdTipOf][VarSet,kdW21,kdTip]
+	[VarSet,kdMsg,[StrMerge,kdW17,INT(kdR),kdW18,INT(kdL),kdW19,INT(kdF),kdW20,INT(kdP),kdW21,kdD3,"s"]]
+	[If,(kdSet2(3)==0)&&(kdSet(2)==0)&&kdKept,
+		[VarSet,kdTip,"The original is the top of a folder, so it was kept (hidden)."][VarSet,kdLI,23][RoutineCall,kdTipOf]
+		[VarSet,kdMsg,[StrMerge,kdMsg,kdNL,kdTip]]
+	]
+	[Note,kdMsg,,6]
 	[RoutineCall,kdEnableUI]
 ]
 
@@ -368,9 +633,35 @@
 	[VarSet,kdSet(2),0][RoutineCall,kdSave]
 ,0,0.5]
 
-[VarSet,kdTip,"KM Decimate 0.1"][VarSet,kdLI,4][RoutineCall,kdTipOf]
+[VarSet,kdTip,"Keep the current state as history, ZRemesher to the target, subdivide and project the details back level by level"][VarSet,kdLI,5][RoutineCall,kdTipOf]
+[IButton,"Zplugin:KM Decimate:ZRemesh Project",kdTip,
+	[RoutineCall,kdRemesh]
+,0,1,,,32]
+
+[VarSet,kdTip,"ZRemesher target polygons in thousands (5 = 5000), like Tool:Geometry:Target Polygons Count"][VarSet,kdLI,6][RoutineCall,kdTipOf]
+[ISlider,"Zplugin:KM Decimate:Target Polys",kdSet2(0),0.1,0.1,200,kdTip,
+	[VarSet,kdSet2(0),[IGet,"Zplugin:KM Decimate:Target Polys"]][RoutineCall,kdSave2]
+,0,1]
+
+[VarSet,kdTip,"0 = auto (the top level comes closest to the original or to Target Faces); other values = always this many levels"][VarSet,kdLI,7][RoutineCall,kdTipOf]
+[ISlider,"Zplugin:KM Decimate:SDiv Levels",kdSet2(1),1,0,8,kdTip,
+	[VarSet,kdSet2(1),[IGet,"Zplugin:KM Decimate:SDiv Levels"]][RoutineCall,kdSave2]
+,0,0.5]
+
+[VarSet,kdTip,"Target faces for the auto levels, in units of 10000; 0 = like the original"][VarSet,kdLI,8][RoutineCall,kdTipOf]
+[ISlider,"Zplugin:KM Decimate:Target Faces",kdSet2(2),1,0,2000,kdTip,
+	[VarSet,kdSet2(2),[IGet,"Zplugin:KM Decimate:Target Faces"]][RoutineCall,kdSave2]
+,0,0.5]
+
+[VarSet,kdTip,"On: ZBrush Project History (first Ctrl+click the current state on the timeline). Off: project from a temporary copy"][VarSet,kdLI,9][RoutineCall,kdTipOf]
+[ISwitch,"Zplugin:KM Decimate:Use History",kdSet2(3),kdTip,
+	[VarSet,kdSet2(3),1][RoutineCall,kdSave2],
+	[VarSet,kdSet2(3),0][RoutineCall,kdSave2]
+,0,1]
+
+[VarSet,kdTip,"KM Decimate 0.2"][VarSet,kdLI,4][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:About",kdTip,
-	[VarSet,kdMsg,"KM Decimate 0.1 - multi-threaded QEM decimation (prototype). Log: C:\Users\Public\KMDecimate\work\log.txt"][VarSet,kdLI,16][RoutineCall,kdText]
+	[VarSet,kdMsg,"KM Decimate 0.2 - multi-threaded QEM decimation (prototype) and ZRemesh Project. Log: C:\Users\Public\KMDecimate\work\log.txt"][VarSet,kdLI,16][RoutineCall,kdText]
 	[Note,kdMsg,,4]
 ,0,1]
 
@@ -380,6 +671,11 @@
 	[VarSet,kdTmp,"Zplugin:KM Decimate:Percent"][VarSet,kdLI,1][RoutineCall,kdLabel]
 	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Groups"][VarSet,kdLI,2][RoutineCall,kdLabel]
 	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Original"][VarSet,kdLI,3][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:ZRemesh Project"][VarSet,kdLI,5][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Target Polys"][VarSet,kdLI,6][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:SDiv Levels"][VarSet,kdLI,7][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Target Faces"][VarSet,kdLI,8][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Use History"][VarSet,kdLI,9][RoutineCall,kdLabel]
 	[VarSet,kdTmp,"Zplugin:KM Decimate:About"][VarSet,kdLI,4][RoutineCall,kdLabel]
 ]
 [RoutineCall,kdApplyLang]

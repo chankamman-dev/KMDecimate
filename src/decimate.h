@@ -41,6 +41,14 @@ namespace kmd {
 using Clock = std::chrono::steady_clock;
 inline double secs(Clock::time_point a) { return std::chrono::duration<double>(Clock::now() - a).count(); }
 
+// 进度和取消（KMDecimate.exe 的监视线程读写）：gRemoved 是已经删掉的三角形数；
+// gCancel 置 true 后各块在下一批折叠后停下，decimate 抛出 Cancelled
+inline std::atomic<size_t> gRemoved{0};
+inline std::atomic<bool> gCancel{false};
+struct Cancelled : std::runtime_error {
+    Cancelled() : std::runtime_error("已取消") {}
+};
+
 template <class F>
 void parallelFor(size_t n, int threads, size_t grain, F&& f) {
     if (threads <= 1 || n <= grain) { for (size_t i = 0; i < n; i++) f(i); return; }
@@ -326,10 +334,15 @@ struct Part {
             pending += r;
             if (pending >= batch) {
                 stop = budget.fetch_sub(pending, std::memory_order_relaxed) - pending <= 0;
+                gRemoved.fetch_add(pending, std::memory_order_relaxed);
+                stop = stop || gCancel.load(std::memory_order_relaxed);
                 pending = 0;
             }
         }
-        if (pending) budget.fetch_sub(pending, std::memory_order_relaxed);
+        if (pending) {
+            budget.fetch_sub(pending, std::memory_order_relaxed);
+            gRemoved.fetch_add(pending, std::memory_order_relaxed);
+        }
         if (heap.size() > 4 * (alive * 3 / 2) + 1024) {  // 过期条目太多时清理
             std::erase_if(heap, [&](const HeapE& h) {
                 return ((fl[h.a] | fl[h.b]) & DEAD) || stamp[h.a] != h.sa || stamp[h.b] != h.sb;
@@ -464,6 +477,7 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
     size_t target = std::max<size_t>(o.targetTris, 4);
 
     for (int pi = 0; g.nt() > target && pi < 64; pi++) {
+        if (gCancel.load()) throw Cancelled();
         auto tp = Clock::now();
         size_t nv = g.nv(), nt = g.nt();
         size_t pre = size_t(target * (1 + o.slack));
@@ -552,6 +566,7 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
             int batch = int(std::clamp<int64_t>(int64_t(cur - goal) / (int64_t(threads) * 64), 1, 256));
             std::atomic<size_t> removed{0};
             parallelFor(nparts, threads, 1, [&](size_t i) { removed += parts[order[i]].run(tau, budget, batch); });
+            if (gCancel.load()) throw Cancelled();
             cur -= removed;
             ps.rounds++;
             if (removed == 0) { tau *= 8; if (++stuck > 8) break; }
