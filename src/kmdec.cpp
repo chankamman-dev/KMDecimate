@@ -1,11 +1,11 @@
 // KMDecimate 命令行原型：读模型 → 减面 → 写模型，并打印各阶段耗时。
 // 用法：kmdec 输入.obj|.GoZ|.stl 输出.obj|.GoZ [--percent 10 | --tris N | --verts N]
-//        [--threads N] [--chunks K] [--slack S] [--border W] [--groups W]
+//        [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W]
 #include "decimate.h"
 #include <windows.h>
 
 static void usage() {
-    printf("用法：kmdec 输入 输出 [--percent P | --tris N | --verts N] [--threads N] [--chunks K] [--slack S] [--border W] [--groups W]\n"
+    printf("用法：kmdec 输入 输出 [--percent P | --tris N | --verts N] [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W]\n"
            "  --threads 1 = 经典单线程 QEM（对照组）；默认用全部逻辑核\n");
 }
 
@@ -147,6 +147,7 @@ int wmain(int argc, wchar_t** argv) {
         else if (k == L"--verts") verts = v;
         else if (k == L"--threads") o.threads = int(v);
         else if (k == L"--chunks") o.chunksPerThread = int(v);
+        else if (k == L"--part") o.partTris = size_t(v);
         else if (k == L"--slack") o.slack = v;
         else if (k == L"--keep") o.keep = v;
         else if (k == L"--seam") o.seamShare = v;
@@ -173,8 +174,8 @@ int wmain(int argc, wchar_t** argv) {
         printf("减面（%d 线程）：%.3f 秒，其中准备 %.3f\n", st.threads, tDec, st.setup);
         for (size_t i = 0; i < st.passes.size(); i++) {
             auto& p = st.passes[i];
-            printf("  第%zu遍 %zu→%zu 面：%.3f 秒（%zu 块，接缝点 %zu，%d 轮，合并 %.3f）\n", i + 1, p.fromTris, p.goal, p.time, p.parts,
-                   p.seamVerts, p.rounds, p.merge);
+            printf("  第%zu遍 %zu→%zu 面：%.3f 秒（%zu 块，接缝点 %zu，%d 轮，切块 %.3f，建堆 %.3f，合并 %.3f）\n", i + 1, p.fromTris, p.goal, p.time,
+                   p.parts, p.seamVerts, p.rounds, p.cut, p.build, p.merge);
         }
         printf("结果：%zu 顶点，%zu 三角形（目标 %zu）\n写出 %s：%.3f 秒\n", r.nv(), r.nt(), o.targetTris, toUtf8(outPath).c_str(), tSave);
         printf("TIMING load=%.3f decimate=%.3f save=%.3f in_tris=%zu out_tris=%zu out_verts=%zu\n", tLoad, tDec, tSave, m.nt(), r.nt(), r.nv());

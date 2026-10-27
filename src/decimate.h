@@ -15,7 +15,8 @@
 struct DecimateOptions {
     size_t targetTris = 0;
     int threads = 0;            // 0 = 全部逻辑核
-    int chunksPerThread = 6;    // 每个线程分到的块数（越多负载越均衡，接缝越多）
+    int chunksPerThread = 6;    // 每个线程至少分到的块数（越多负载越均衡，接缝越多）
+    size_t partTris = 30000;    // 大模型按每块约这么多三角形切：块小、堆小，留在 CPU 缓存里（4800 万面快 1.5 倍）
     double slack = 0.15;        // 倒数第二遍停在目标 ×(1+slack)，最后一遍错开网格收尾
     double keep = 0.25;         // 每一遍最多减到当前面数的这个比例
     double seamShare = 0.15;    // 接缝点最多占这一遍目标顶点数的比例，超了就少切几块
@@ -27,7 +28,7 @@ struct DecimateOptions {
 struct PassStat {
     size_t fromTris = 0, goal = 0, parts = 0, seamVerts = 0;
     int rounds = 0;
-    double time = 0, merge = 0;
+    double time = 0, merge = 0, cut = 0, build = 0;
 };
 
 struct DecimateStats {
@@ -118,7 +119,40 @@ struct Ctx {
 };
 
 struct HeapE { float cost; uint32_t a, b, sa, sb; };
-struct HeapCmp { bool operator()(const HeapE& x, const HeapE& y) const { return x.cost > y.cost; } };
+// 4 叉最小堆：比 std 的二叉堆浅一半，4 个孩子挨着放，弹出时少一半缓存缺失
+inline void heapDown(std::vector<HeapE>& h, size_t i) {
+    size_t n = h.size();
+    HeapE x = h[i];
+    for (;;) {
+        size_t c = i * 4 + 1;
+        if (c >= n) break;
+        size_t e = std::min(c + 4, n), m = c;
+        for (size_t j = c + 1; j < e; j++) if (h[j].cost < h[m].cost) m = j;
+        if (!(h[m].cost < x.cost)) break;
+        h[i] = h[m];
+        i = m;
+    }
+    h[i] = x;
+}
+inline void heapPush(std::vector<HeapE>& h, const HeapE& x) {
+    size_t i = h.size();
+    h.push_back(x);
+    while (i > 0) {
+        size_t p = (i - 1) / 4;
+        if (!(x.cost < h[p].cost)) break;
+        h[i] = h[p];
+        i = p;
+    }
+    h[i] = x;
+}
+inline void heapPop(std::vector<HeapE>& h) {
+    h.front() = h.back();
+    h.pop_back();
+    if (!h.empty()) heapDown(h, 0);
+}
+inline void heapMake(std::vector<HeapE>& h) {
+    for (size_t i = h.size() / 4 + 1; i-- > 0;) if (i < h.size()) heapDown(h, i);
+}
 
 struct Part {
     const DecimateOptions* opt = nullptr;
@@ -175,7 +209,7 @@ struct Part {
                 if (plan(a, b, u, v, x, c)) heap.push_back({float(c), a, b, 0, 0});
             }
         }
-        std::make_heap(heap.begin(), heap.end(), HeapCmp());
+        heapMake(heap);
     }
 
     void trisOf(uint32_t v, std::vector<uint32_t>& out) {
@@ -307,8 +341,7 @@ struct Part {
         for (uint32_t w : Nu) {
             uint32_t a, b; double y[3], c;
             if (plan(u, w, a, b, y, c)) {
-                heap.push_back({float(c), u, w, stamp[u], stamp[w]});
-                std::push_heap(heap.begin(), heap.end(), HeapCmp());
+                heapPush(heap, {float(c), u, w, stamp[u], stamp[w]});
             }
         }
         return shared;
@@ -322,8 +355,7 @@ struct Part {
         while (!stop && !heap.empty()) {
             if (heap.front().cost > tau) break;
             HeapE e = heap.front();
-            std::pop_heap(heap.begin(), heap.end(), HeapCmp());
-            heap.pop_back();
+            heapPop(heap);
             if ((fl[e.a] | fl[e.b]) & DEAD) continue;
             if (stamp[e.a] != e.sa || stamp[e.b] != e.sb) continue;
             uint32_t u, v; double x[3], c;
@@ -347,7 +379,7 @@ struct Part {
             std::erase_if(heap, [&](const HeapE& h) {
                 return ((fl[h.a] | fl[h.b]) & DEAD) || stamp[h.a] != h.sa || stamp[h.b] != h.sb;
             });
-            std::make_heap(heap.begin(), heap.end(), HeapCmp());
+            heapMake(heap);
         }
         return removed;
     }
@@ -442,7 +474,8 @@ inline Ctx makeCtx(const Mesh& m, const DecimateOptions& o, int threads) {
 
 // 选格子大小，使非空格子数接近 want（用三角形重心的抽样估计）
 inline double pickCell(const Ctx& g, const float* lo, const float* hi, size_t want) {
-    size_t nt = g.nt(), step = std::max<size_t>(1, nt / 200000);
+    // 抽样数随块数走（每块约 40 个点就估得准），二分 40 次都要排序，抽太多是小模型的主要固定开销
+    size_t nt = g.nt(), step = std::max<size_t>(1, nt / std::clamp<size_t>(want * 40, 20000, 200000));
     std::vector<float> cs;
     for (size_t t = 0; t < nt; t += step)
         for (int j = 0; j < 3; j++)
@@ -491,7 +524,7 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
         if (!single)
             for (size_t i = 0; i < nv; i++)
                 for (int j = 0; j < 3; j++) { lo[j] = std::min(lo[j], g.P[i * 3 + j]); hi[j] = std::max(hi[j], g.P[i * 3 + j]); }
-        for (size_t want = size_t(threads) * o.chunksPerThread; !single;) {
+        for (size_t want = std::max(size_t(threads) * o.chunksPerThread, nt / std::max<size_t>(o.partTris, 1)); !single;) {
             double cell = pickCell(g, lo, hi, want);
             double off = (pi & 1) * 0.5 * cell;
             int dim[3];
@@ -536,12 +569,15 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
         std::vector<uint32_t> order(nparts);
         for (size_t i = 0; i < nparts; i++) order[i] = uint32_t(i);
         std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return pstart[a + 1] - pstart[a] > pstart[b + 1] - pstart[b]; });
+        ps.cut = secs(tp);
+        auto tb = Clock::now();
         std::vector<Part> parts(nparts);
         parallelFor(nparts, threads, 1, [&](size_t i) {
             uint32_t p = order[i];
             parts[p].opt = &o;
             parts[p].build(g, &tids[pstart[p]], pstart[p + 1] - pstart[p], seam);
         });
+        ps.build = secs(tb);
         // ---- 一轮一轮抬阈值
         size_t cur = nt;
         double tau = 0;
