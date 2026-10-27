@@ -69,7 +69,7 @@
 
 剩下的大头是折叠循环本身（约 3–4 秒）：瓶颈是内存延迟，一条边的代价要读两端的误差矩阵（80 字节）、位置、颜色、标志、时间戳，分散在 5 个数组里。再往下可以把每个顶点的数据排成一个结构体（AoS），预计还能快 15–30%，改动大，先没做。
 
-ZBrush 端：插件每次减面在 `work\zb_times.txt` 追加一行导出 / 计算 / 导入 / 合计秒数（导出含复制子工具和删低级别），用来看整个往返里时间花在哪。
+ZBrush 端：每次减面的导出 / 计算 / 导入（第一次、第二次）/ 合计秒数先用 VarSave 存成 `work\zb_last.zvr`，exe 下次启动时追加到 `work\zb_times.txt`（导出含复制子工具和删低级别），用来看整个往返里时间花在哪。
 
 ### 保留顶点色（0.3）
 
@@ -139,7 +139,8 @@ ZBrush 端：插件每次减面在 `work\zb_times.txt` 追加一行导出 / 计�
   - 开着“保留原物体”：原模型保留并隐藏，结果叫 `原名_ZR`；关掉：投射完删掉原模型，结果改回原名。原模型是文件夹的第一个子工具时不删，因为可能把文件夹一起删掉。
 - **用历史投射**（开）：原地操作，用 ZBrush 自带的 Project History（Project Undo History）逐级投射。ZScript 没法自己记录历史点，所以按按钮前要先在时间轴上 **Ctrl+点击** 当前状态。不复制，省内存，但不能保留原物体。
 - **进度和取消**：计算时 ZBrush 底部的进度条显示“读取 / 准备 / 正在减面 xx% / 写出”。这时在 ZBrush 里按 **Esc** 取消，exe 在 0.2–0.5 秒内停下，复制出来的副本会被删掉，模型不变。ZScript 在等待时读不到按键，所以 Esc 由 exe 检测：用 `GetAsyncKeyState`，只在前台是 ZBrush（或 ZBrush“未响应”时的 Ghost 窗口）时才算。exe 每 0.1 秒写一次 `work\progress.bin`（3 个 float：阶段、比例、心跳）。不再有固定的 10 分钟超时，改成心跳 30 秒不动才放弃，第一次心跳前最多等 2 分钟，因为安全软件可能会拦新 exe。导出和导入是 ZBrush 自己在做，只能显示提示，取消不了。测试取消可以设环境变量 `KMDEC_TEST_CANCEL=秒数`。
-- 流程：ZScript 导出 GoZ 到 `C:\Users\Public\KMDecimate\work\in.GoZ` → `KMDecimate.exe job.txt` → 写 `out.GoZ` + `status.txt` + `note.txt` → ZScript 导入。日志 `work\log.txt`。
+- 流程：ZScript 导出 GoZ 到 `C:\Users\Public\KMDecimate\work\in.GoZ` → `KMDecimate.exe job.zvr` → 写 `out.GoZ` + `status.txt` + `note.txt` → ZScript 导入。日志 `work\log.txt`。
+- 任务交接（0.3.1）：插件用 **VarSave** 把 [格式号 2, 百分比, 保留组, 线程数, 顶点色, job.txt 的写入返回值, 编号] 存成 `work\job.zvr`（zvr 格式：`e9 03 00 00`、元素个数 u32、每个元素 `'F'` + float32），exe 读它，输入输出固定是同目录的 in.GoZ / out.GoZ。原因：用户的一个 ZBrush 2026 会话里 MemSaveToFile 写不进去（job.txt 停在旧内容，exe 拿旧设置减面，开了顶点色也被当成关），VarSave 一直正常。job.txt 照写（给旧 exe），MemSaveToFile 的返回值记进 job.zvr，日志里是 `job=zvr jobtxt=…`；zvr 读不了才退回同目录的 job.txt。插件每次开始先删掉旧的 job.txt 和 job.zvr，读不到任务就报错，不会再悄悄用上一次的任务。
 - 组装与安装：先 `build.ps1`，再 `py -3 tools/package.py --install`（默认装到 `F:\Zbrush Assest\ZStartup\ZPlugs64` 和 `F:\art software\zbrush 2024.0.4\ZStartup\ZPlugs64`）。改 ZScript 后 package.py 会先跑 `tools/zscript_lint.py`。
 - 第一次需要在 ZBrush 里 ZScript > Load 选 `ZPlugs64\KMDecimate.txt`，之后 ZBrush 启动会自动编译。
 

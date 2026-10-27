@@ -76,6 +76,21 @@
 // a color.zvr saved by the first 0.3 has no color detail yet
 [If,kdSet3(1)<1,[VarSet,kdSet3(1),8]]
 
+// the job and the ZBrush side timings go to KMDecimate.exe through VarSave: in one ZBrush 2026 session MemSaveToFile
+// stopped writing (job.txt stayed old, the exe ran with old settings) while VarSave kept working
+[VarDef,kdJobZ,"C:\Users\Public\KMDecimate\work\job.zvr"]
+[VarDef,kdTimesZ,"C:\Users\Public\KMDecimate\work\zb_last.zvr"]
+// job.zvr: 0 format (2)  1 percent  2 keep groups  3 threads  4 polypaint (0 = drop, 1-10 = color detail)
+//          5 what MemSaveToFile returned for job.txt (to find out why it failed)  6 run id (start time)  7 spare
+[VarDef,kdJob(8),0]
+// zb_last.zvr: 0 format (3)  1 export  2 compute  3 import  4 reimport  5 total  6 copy  7 polypaint  8 percent
+//              9 MemSaveToFile result of job.txt  10 first import  11 second import  12 run id  13 spare
+[VarDef,kdTimes(14),0]
+// import timers: before the first import, after it, after the second one
+[VarDef,kdTi0,0]
+[VarDef,kdTi1,0]
+[VarDef,kdTi2,0]
+
 // remesh state: source / result subtool, face counts (original, after ZRemesher, final), levels, saved UI values
 [VarDef,kdSrc,0]
 [VarDef,kdDst,0]
@@ -282,10 +297,13 @@
 		[VarSet,kdSc(2),[IGet,"Tool:Export:Y Offset"]]
 		[VarSet,kdSc(3),[IGet,"Tool:Export:Z Offset"]]
 	]
+	[VarSet,kdTi0,[ZBrushInfo,2]]
 	[FileNameSetNext,kdRes]
 	[IPress,Tool:Import]
+	[VarSet,kdTi1,[ZBrushInfo,2]]
+	[VarSet,kdTi2,kdTi1]
+	[VarSet,kdReimp,0]
 	[If,[IExists,Tool:Export:Scale],
-		[VarSet,kdReimp,0]
 		[If,kdSc(0)!=[IGet,Tool:Export:Scale],[VarSet,kdReimp,1]]
 		[If,kdSc(1)!=[IGet,"Tool:Export:X Offset"],[VarSet,kdReimp,1]]
 		[If,kdSc(2)!=[IGet,"Tool:Export:Y Offset"],[VarSet,kdReimp,1]]
@@ -297,6 +315,7 @@
 			[ISet,"Tool:Export:Z Offset",kdSc(3)]
 			[FileNameSetNext,kdRes]
 			[IPress,Tool:Import]
+			[VarSet,kdTi2,[ZBrushInfo,2]]
 		]
 	]
 ]
@@ -308,8 +327,17 @@
 	[IPress,Tool:SubTool:Rename]
 ]
 
-// job.txt (ASCII lines): KMDEC1 / in.GoZ / out.GoZ / percent / keep groups / threads / polypaint (0 = drop, 1-10 = keep with this color detail) / END
+// job.zvr (VarSave, see kdJob) is what KMDecimate.exe reads. job.txt (ASCII lines: KMDEC1 / in.GoZ / out.GoZ / percent /
+// keep groups / threads / polypaint (0 = drop, 1-10 = keep with this color detail) / END) is still written for older exes;
+// what MemSaveToFile returns goes into job.zvr
 [RoutineDef,kdWriteJob,
+	[VarSet,kdJob(0),2]
+	[VarSet,kdJob(1),kdSet(0)]
+	[VarSet,kdJob(2),kdSet(1)]
+	[VarSet,kdJob(3),kdSet(3)]
+	[VarSet,kdJob(4),kdSet3(0)*kdSet3(1)]
+	[VarSet,kdJob(5),-999]
+	[VarSet,kdJob(6),kdT0]
 	[MemDelete,kdJobM]
 	[MemCreate,kdJobM,4096,0]
 	[VarSet,kdWPos,0]
@@ -322,8 +350,9 @@
 	[If,kdSet3(0),[VarSet,kdLine,[StrMerge,kdSet3(1),""]],[VarSet,kdLine,"0"]][RoutineCall,kdAdd]
 	[VarSet,kdLine,"END"][RoutineCall,kdAdd]
 	[MemResize,kdJobM,kdWPos]
-	[MemSaveToFile,kdJobM,[StrMerge,kdWork,"job.txt"],1]
+	[VarSet,kdJob(5),[MemSaveToFile,kdJobM,[StrMerge,kdWork,"job.txt"],1]]
 	[MemDelete,kdJobM]
+	[VarSave,kdJob,kdJobZ]
 ]
 
 // note bar words in the current language (read once)
@@ -389,23 +418,24 @@
 	[NoteBar,""]
 ]
 
-// one line per run appended to work\zb_times.txt: the ZBrush side of the round trip (seconds), to see where the time goes
-// export = duplicate + Del Lower + GoZ export, compute = KMDecimate.exe incl. waiting, import = GoZ import + rename
+// the ZBrush side of the round trip (seconds) saved to work\zb_last.zvr (see kdTimes); KMDecimate.exe appends it to
+// work\zb_times.txt when it starts the next time. export = duplicate + Del Lower + GoZ export, compute = KMDecimate.exe incl.
+// waiting, import = GoZ import (+ the second import when Tool:Import changed the export scale) + rename
 [RoutineDef,kdLogTimes,
-	[VarSet,kdTmp,[StrMerge,kdWork,"zb_times.txt"]]
-	[MemDelete,kdJobM]
-	[If,[FileExists,kdTmp],
-		[MemCreateFromFile,kdJobM,kdTmp]
-		[VarSet,kdWPos,[MemGetSize,kdJobM]]
-		[MemResize,kdJobM,kdWPos+512,0],
-		[MemCreate,kdJobM,512,0]
-		[VarSet,kdWPos,0]
-	]
-	[VarSet,kdLine,[StrMerge,"export ",kdD1," compute ",INT((kdT2-kdT1)*100)/100," import ",kdD2," total ",kdD3," copy ",kdCopy]]
-	[RoutineCall,kdAdd]
-	[MemResize,kdJobM,kdWPos]
-	[MemSaveToFile,kdJobM,kdTmp,1]
-	[MemDelete,kdJobM]
+	[VarSet,kdTimes(0),3]
+	[VarSet,kdTimes(1),kdD1]
+	[VarSet,kdTimes(2),INT((kdT2-kdT1)*100)/100]
+	[VarSet,kdTimes(3),kdD2]
+	[VarSet,kdTimes(4),kdReimp]
+	[VarSet,kdTimes(5),kdD3]
+	[VarSet,kdTimes(6),kdCopy]
+	[VarSet,kdTimes(7),kdJob(4)]
+	[VarSet,kdTimes(8),kdJob(1)]
+	[VarSet,kdTimes(9),kdJob(5)]
+	[VarSet,kdTimes(10),INT((kdTi1-kdTi0)*100)/100]
+	[VarSet,kdTimes(11),INT((kdTi2-kdTi1)*100)/100]
+	[VarSet,kdTimes(12),kdT0]
+	[VarSave,kdTimes,kdTimesZ]
 ]
 
 // note.txt of the exe + how long export / import took
@@ -444,8 +474,15 @@
 	[VarSet,kdTmp,[StrMerge,kdWork,"status.txt"]][RoutineCall,kdDel]
 	[VarSet,kdTmp,[StrMerge,kdWork,"note.txt"]][RoutineCall,kdDel]
 	[VarSet,kdTmp,kdPrg][RoutineCall,kdDel]
+	// an old job must never be read again (that happened when MemSaveToFile could not write job.txt)
+	[VarSet,kdTmp,[StrMerge,kdWork,"job.txt"]][RoutineCall,kdDel]
+	[VarSet,kdTmp,kdJobZ][RoutineCall,kdDel]
 	[VarSet,kdStat,""]
 	[VarSet,kdCanc,0]
+	[VarSet,kdReimp,0]
+	[VarSet,kdTi0,0]
+	[VarSet,kdTi1,0]
+	[VarSet,kdTi2,0]
 	// a subtool with subdivision levels is always decimated as a copy (deleting its lower levels in place is not undoable)
 	[VarSet,kdCopy,kdSet(2)]
 	[If,[IGetMax,Tool:Geometry:SDiv]>1,[VarSet,kdCopy,1]]
@@ -463,7 +500,7 @@
 	[VarSet,kdT3,kdT1]
 	[If,[FileExists,kdGoz],
 		[RoutineCall,kdWriteJob]
-		[VarSet,kdTmp,[StrMerge,kdWork,"job.txt"]]
+		[VarSet,kdTmp,kdJobZ]
 		[RoutineCall,kdLaunch]
 		[RoutineCall,kdWait]
 		[VarSet,kdT2,[ZBrushInfo,2]]
