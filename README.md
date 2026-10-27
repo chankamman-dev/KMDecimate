@@ -144,6 +144,20 @@ ZBrush 端：每次减面的导出 / 计算 / 导入（第一次、第二次）/
 - 组装与安装：先 `build.ps1`，再 `py -3 tools/package.py --install`（默认装到 `F:\Zbrush Assest\ZStartup\ZPlugs64` 和 `F:\art software\zbrush 2024.0.4\ZStartup\ZPlugs64`）。改 ZScript 后 package.py 会先跑 `tools/zscript_lint.py`。
 - 第一次需要在 ZBrush 里 ZScript > Load 选 `ZPlugs64\KMDecimate.txt`，之后 ZBrush 启动会自动编译。
 
+### 重拓扑：预减面和分步计时（0.3.1）
+
+用户问重拓扑能不能更快。插件只是按 ZBrush 的按钮（复制、ZRemesher、Divide、ProjectAll），时间几乎都花在 ZBrush 自己身上；用户的 3400 万面角色上 ZRemesher 直接吃完整的 3400 万面，而目标只有 5000 面。
+
+- **预减面(万)**（`kdSet4(0)`，存 `remesh2.zvr`，默认 100 = 100 万个三角形，0 = 关）：复制以后、ZRemesher 之前，把副本导出、用 KMDecimate.exe 减到这么多个三角形（保留组边界，去掉顶点色）、再导回副本，ZRemesher 在轻得多的模型上算；细分后的投射仍然从原模型来，细节不少。至少取 ZRemesher 目标的 40 倍；原模型面数不到目标的 1.2 倍就不预减面；用历史投射（原地操作）时不预减面。预减面时按 Esc 会删掉副本、整个重拓扑取消；exe 出错则 ZRemesher 照样用完整副本，弹窗里会说。
+- job.zvr 第 7 位是**目标三角形数**（大于 0 时 exe 按它减、不看百分比），预减面用它；减面按钮写 0。插件把“写任务”拆成 `kdSaveJob`（写 job.txt 和 job.zvr）和 `kdWriteJob`（按面板设置填参数）。
+- **分步计时**：弹窗最后一行是 复制 / 预减面 / ZRemesher / 细分并投射（最高一级）各用几秒，预减面成功时还写减到了多少面；同时用 VarSave 存 `work\zr_last.zvr`（0 格式号 1 / 1 复制 / 2 预减面 / 3 ZRemesher / 4 细分并投射 / 5 最高一级 / 6 合计 / 7 原面数 / 8 预减面后 / 9 ZRemesher 后 / 10 最终 / 11 级数 / 12 预减面目标（0 = 没做）/ 13 kdPre）。
+- 真实模型上预减面这一步（exe）：3400 万 → 100 万面 5.8 秒，加上 ZBrush 导出导入约 1 秒。值不值要看 ZBrush 里 ZRemesher 在 3400 万面和 100 万面上各要多久：请用户把预减面设 0 和 100 各跑一次，对比弹窗里的分步用时和布线。
+- `tools/test_job_handoff.py` 加了目标三角形数的两项（共 15 项）。
+- 用户第一次对比（1808384 面的子工具，ZRemesher 目标 5000、细分 4 级）：不预减面时 ZRemesher 15.4 秒、细分并投射 3.5 秒、合计 26.1 秒，另有约 7 秒没归到任何一步；预减面那次的 ZRemesher 用时被覆盖了（zr_last.zvr 只存最后一次），只知道 exe 把 360 万三角形减到 100 万用了 0.57 秒。于是又加了：
+  - `zr_last_pre.zvr` / `zr_last_full.zvr` 分别留最后一次预减面 / 不预减面的结果；记录扩到 21 项（格式号 2）：多了 准备投射（隐藏其他子工具、导出底模）、收尾（显示其他子工具、删除或隐藏原模型、改名）、预减面里的 导出 / exe / 导入 三段、子工具数、编号。弹窗多一行“其他”。
+  - ZRemesher 结果导出成 `zr_base_pre|full.GoZ`（算在“准备投射”里，几千面很快），最终模型导出成 `zr_final_pre|full.GoZ`（在计时之外）。
+  - `py -3 -X utf8 tools/compare_remesh.py [work 目录]`：两次的分步用时并排、两个 ZRemesher 结果的布线指标（极点数和比例、边长变异系数、四边形长宽比和偏离直角）、线框对比图 `zr_compare_base.png`（`meshshot --quads 1` 不画四边形对角线），以及两个最终模型之间的 meshdiff 距离。
+
 ## 和减面大师对比：测试步骤
 
 1. 在 ZBrush 里选中要测的 SubTool（最高细分级），Tool > Export 导出 OBJ，比如存到 `G:\ai liabary\KMDecimate\bench\input\测试.obj`。

@@ -86,6 +86,7 @@ static std::vector<float> readZvr(const std::wstring& path) {
 struct Job {
     std::wstring in, out;
     double percent = 10, detail = 1;  // detail：0 = 不保留顶点色，1–10 = 颜色细节
+    double target = 0;                // 目标三角形数：大于 0 时按它减，不看百分比（重拓扑前的预减面用）
     int groups = 0, threads = 0;
     std::string src;                  // 从哪读的，写进 log
 };
@@ -115,7 +116,8 @@ static Job readJobTxt(const std::wstring& path) {
 }
 
 // job.zvr（插件用 VarSave 存）：0 格式号 2 / 1 百分比 / 2 保留组 / 3 线程数 / 4 顶点色（0 = 不保留，1–10 = 颜色细节）/
-// 5 插件同时写 job.txt 时 MemSaveToFile 的返回值（排查用）/ 6 这次减面的编号。输入输出固定是同目录的 in.GoZ、out.GoZ。
+// 5 插件同时写 job.txt 时 MemSaveToFile 的返回值（排查用）/ 6 这次减面的编号 / 7 目标三角形数（0 = 按百分比）。
+// 输入输出固定是同目录的 in.GoZ、out.GoZ。
 // ZBrush 2026 出现过 MemSaveToFile 写不进去、VarSave 正常的情况，所以插件改用 VarSave 交任务；zvr 读不了时退回同目录的 job.txt
 // （插件每次开始都会删掉旧的 job.txt 和 job.zvr，所以不会读到上一次的任务）。
 static Job readJob(const std::wstring& path, const std::wstring& dir) {
@@ -131,6 +133,7 @@ static Job readJob(const std::wstring& path, const std::wstring& dir) {
             j.groups = int(v[2]);
             j.threads = int(v[3]);
             j.detail = v[4];
+            j.target = v.size() > 7 ? v[7] : 0;
             char t[64];
             snprintf(t, sizeof t, "zvr jobtxt=%g", v.size() > 5 ? double(v[5]) : -999.0);
             j.src = t;
@@ -215,7 +218,7 @@ static int runJob(const std::wstring& jobPath) {
         bool hadColor = !m.C.empty();
         if (!keepColor) m.C.clear();  // 只按形状减，结果不带 Polypaint
         if (kmd::gCancel) throw kmd::Cancelled();
-        o.targetTris = size_t(std::max(4.0, m.nt() * percent / 100));
+        o.targetTris = job.target > 0 ? size_t(job.target) : size_t(std::max(4.0, m.nt() * percent / 100));
         mon.toRemove = m.nt() > o.targetTris ? m.nt() - o.targetTris : 1;
         mon.stage = 1;
         DecimateStats st;
@@ -231,9 +234,9 @@ static int runJob(const std::wstring& jobPath) {
         snprintf(note, sizeof note, "KM 减面：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）%s", m.nt(), r.nt(), r.nv(),
                  tDec, tLoad, tSave, st.threads, !hadColor ? "" : keepColor ? "，保留了顶点色" : "，去掉了顶点色");
         snprintf(log, sizeof log,
-                 "%s percent=%g groups=%d color=%g had_color=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d job=%s\r\n",
+                 "%s percent=%g groups=%d color=%g had_color=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d target=%.0f job=%s\r\n",
                  toUtf8(in).c_str(), percent, o.groupWeight > 0, keepColor ? detail : 0.0, hadColor, m.nt(), r.nt(), tLoad, tDec, tSave, st.passes.size(),
-                 st.threads, job.src.c_str());
+                 st.threads, job.target, job.src.c_str());
         finish("1", note, log);
         return 0;
     } catch (kmd::Cancelled&) {

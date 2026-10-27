@@ -1,8 +1,9 @@
 // 把带 Polypaint 的网格正交渲染成 PNG，用来肉眼比较减面前后的颜色（比如眼睛）。
-// 用法：meshshot 模型 输出.png [--view +z] [--crop 中心x 中心y 宽] [--size 800] [--wire 1] [--flipy 1] [--focus x y z 宽]
+// 用法：meshshot 模型 输出.png [--view +z] [--crop 中心x 中心y 宽] [--size 800] [--wire 1] [--quads 1] [--flipy 1] [--focus x y z 宽]
 //   view：从哪个方向看（+z = 从 +Z 往 -Z 看，屏幕右 = +X，上 = +Y；也可以 -z / +x / -x / +y / -y）
 //   crop：在投影包围盒里取一块（0–1 归一，中心和宽度），默认整个模型；几个模型用同样参数就能对齐比较
 //   wire：叠加三角形边（看颜色边界附近留了多少面）
+//   quads：线框里不画四边形的对角线（GoZ 读进来的四边形拆成 (a,b,c)(a,c,d) 两个相邻三角形，按这个认）
 //   flipy：上下翻转（ZBrush 的 GoZ 里 Y 朝下，从 -z 看是倒着的）
 #include "meshio.h"
 #include <cmath>
@@ -66,7 +67,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     std::wstring view = L"+z";
     double cx = 0.5, cy = 0.5, cw = 1;
-    int size = 800, wire = 0, flipy = 0;
+    int size = 800, wire = 0, flipy = 0, quads = 0;
     double focus[4] = {0, 0, 0, 0};  // --focus x y z 宽：以模型坐标里的一点为中心，取这么宽（比如 meshdiff 的 MAXAT）
     for (int i = 3; i < argc; i++) {
         std::wstring k = argv[i];
@@ -75,6 +76,7 @@ int wmain(int argc, wchar_t** argv) {
         else if (k == L"--size" && i + 1 < argc) size = _wtoi(argv[++i]);
         else if (k == L"--wire" && i + 1 < argc) wire = _wtoi(argv[++i]);
         else if (k == L"--flipy" && i + 1 < argc) flipy = _wtoi(argv[++i]);
+        else if (k == L"--quads" && i + 1 < argc) quads = _wtoi(argv[++i]);
         else if (k == L"--focus" && i + 4 < argc) {
             for (int j = 0; j < 4; j++) focus[j] = _wtof(argv[i + 1 + j]);
             i += 4;
@@ -110,6 +112,15 @@ int wmain(int argc, wchar_t** argv) {
         std::vector<float> zb(size_t(W) * H, -1e30f);
         std::vector<uint8_t> img(size_t(W) * H * 3, 160);
         auto col = [&](uint32_t v, int j) { return m.C.empty() ? 200.0 : double(m.C[v] >> (16 - 8 * j) & 255); };
+        // 每个三角形不画的边（位 k = 顶点 k 对面的边）：四边形的对角线
+        std::vector<uint8_t> skip(m.nt(), 0);
+        if (quads)
+            for (size_t t = 0; t + 1 < m.nt(); t++)
+                if (m.T[t * 3] == m.T[t * 3 + 3] && m.T[t * 3 + 2] == m.T[t * 3 + 4]) {
+                    skip[t] |= 2;      // (a,b,c) 里 b 对面的 a-c
+                    skip[t + 1] |= 4;  // (a,c,d) 里 d 对面的 a-c
+                    t++;
+                }
         for (size_t t = 0; t < m.nt(); t++) {
             uint32_t vi[3] = {m.T[t * 3], m.T[t * 3 + 1], m.T[t * 3 + 2]};
             double X[3], Y[3], Z[3];
@@ -140,9 +151,10 @@ int wmain(int argc, wchar_t** argv) {
                     size_t o = size_t(py) * W + px;
                     if (z <= zb[o]) continue;
                     zb[o] = z;
-                    bool edge = wire && std::min({w0 * std::fabs(area) / std::hypot(X[1] - X[2], Y[1] - Y[2]),
-                                                  w1 * std::fabs(area) / std::hypot(X[2] - X[0], Y[2] - Y[0]),
-                                                  w2 * std::fabs(area) / std::hypot(X[0] - X[1], Y[0] - Y[1])}) < 0.6;
+                    double d0 = skip[t] & 1 ? 1e9 : w0 * std::fabs(area) / std::hypot(X[1] - X[2], Y[1] - Y[2]);
+                    double d1 = skip[t] & 2 ? 1e9 : w1 * std::fabs(area) / std::hypot(X[2] - X[0], Y[2] - Y[0]);
+                    double d2 = skip[t] & 4 ? 1e9 : w2 * std::fabs(area) / std::hypot(X[0] - X[1], Y[0] - Y[1]);
+                    bool edge = wire && std::min({d0, d1, d2}) < 0.6;
                     for (int j = 0; j < 3; j++) {
                         double v = (w0 * col(vi[0], j) + w1 * col(vi[1], j) + w2 * col(vi[2], j)) * shade;
                         img[o * 3 + j] = uint8_t(std::clamp(edge ? v * 0.55 : v, 0.0, 255.0));

@@ -109,6 +109,13 @@ st, note, last = run(work + "job.zvr")
 times2 = open(work + "zb_times.txt", encoding="utf-8").read()
 check("not appended twice", times2.count("run=98765") == 1, times2)
 
+# 8. remesh pre-decimation: element 7 = target triangles (the percent is ignored), groups kept, no polypaint
+open(work + "job.zvr", "wb").write(zvr([2, 0.1, 1, 0, 0, 0, 1237, 50000]))
+st, note, last = run(work + "job.zvr")
+out_tris = int(last.split("out_tris=")[1].split()[0]) if "out_tris=" in last else 0
+check("target triangles: about 50000 out, percent ignored", st == "1" and abs(out_tris - 50000) < 500 and "target=50000" in last, last)
+check("target triangles: groups kept, no polypaint", "groups=1" in last and not has_mrgb(work + "out.GoZ"), last)
+
 print("%d failure(s)" % fails)
 shutil.rmtree(work, ignore_errors=True)
 sys.exit(1 if fails else 0)
