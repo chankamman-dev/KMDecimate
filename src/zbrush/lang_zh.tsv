@@ -5,7 +5,7 @@
 1	Percent	保留百分比	保留原来三角形数量的百分之几（10 = 减到十分之一）
 2	Keep Groups	保留组边界	尽量不让 polygroup 的边界变形
 3	Keep Original	保留原物体	开：原物体保留（重拓扑后隐藏它）；关：减面直接改当前子工具，重拓扑投射完删掉原物体
-4	About	关于	KM 减面 0.2
+4	About	关于	KM 减面 0.3
 5	ZRemesh Project	重拓扑并投射	把当前状态存为历史，ZRemesher 到目标面数，自动细分，并逐级把细节投射回来
 6	Target Polys	目标多边形数	ZRemesher 的目标面数，单位千（5 = 5000），同 ZBrush 的 Target Polygons Count
 7	SDiv Levels	细分级数	0 = 自动（最高级面数最接近原模型或“目标面数”）；其他值 = 固定细分这么多级
@@ -17,7 +17,7 @@
 13			导出
 14			导入
 15			全程
-16			KM 减面 0.2：多线程 QEM 减面原型 + 重拓扑并投射。日志在 C:\Users\Public\KMDecimate\work\log.txt
+16			KM 减面 0.3：多线程 QEM 减面（保留顶点色边界）+ 重拓扑并投射。日志在 C:\Users\Public\KMDecimate\work\log.txt
 17			KM 重拓扑：ZRemesher 后
 18			 面，细分
 19			 级，最高级
@@ -35,3 +35,5 @@
 31			KM 重拓扑：ZRemesher 计算中…
 32			KM 重拓扑：细分并投射
 33			KM 减面：已取消，模型没有改动。
+34	Keep Polypaint	保留顶点色	开：颜色边界附近多留面、保持清晰，结果带 Polypaint；关：只按形状减，结果不带颜色
+35	Color Detail	颜色细节	保留顶点色时把多少面让给颜色边界：1 形状优先，10 眼睛、描线最清楚（别处面更少）

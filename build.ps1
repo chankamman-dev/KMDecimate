@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 New-Item -ItemType Directory -Force "$root\bin" | Out-Null
 $flags = @('-std=c++20', '-O3', '-march=native', '-municode', '-static', '-pthread', '-Wall', '-Wno-sign-compare')
-foreach ($t in 'kmdec', 'meshdiff', 'meshgen') {
+foreach ($t in 'kmdec', 'meshdiff', 'meshgen', 'meshshot') {
     & g++ @flags "$root\src\$t.cpp" -o "$root\bin\$t.exe"
     if ($LASTEXITCODE -ne 0) { throw "编译 $t 失败" }
 }

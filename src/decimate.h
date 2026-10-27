@@ -22,7 +22,11 @@ struct DecimateOptions {
     double seamShare = 0.15;    // 接缝点最多占这一遍目标顶点数的比例，超了就少切几块
     double borderWeight = 10;   // 开放边界约束
     double groupWeight = 0;     // >0 时保留 polygroup 边界
+    double colorWeight = 0.3;   // >0 且有 Polypaint 时，颜色差大的边更晚折叠（颜色边界附近多留面）
+    double colorEdge = 0.3;     // >0 时颜色边界两侧的点只能沿边界滑，不能往边界靠或离开（边界保持锐利）
     double flipCos = 0.2;       // 折叠后三角形法线与原法线夹角余弦的下限
+    bool fastExit = false;      // 调用者减完就退出进程：用过的大块内存不在这里释放，留给进程退出时一起回收
+                                // （单线程释放几 GB 要 0.5 秒以上，而插件只等 status.txt，不等进程退出）
 };
 
 struct PassStat {
@@ -68,6 +72,46 @@ void parallelFor(size_t n, int threads, size_t grain, F&& f) {
     for (auto& t : ts) t.join();
 }
 
+// 把 [0, n) 切成 nb 段并行处理：f(段号, 起, 止)。段数固定，分段结果和线程调度无关
+template <class F>
+void parallelBlocks(size_t n, int threads, size_t nb, F&& f) {
+    parallelFor(nb, threads, 1, [&](size_t b) { f(b, n * b / nb, n * (b + 1) / nb); });
+}
+
+// fastExit 时用：把对象挪到堆上再也不释放，进程退出时由系统一起回收
+template <class T>
+void keepUntilExit(T&& x) { new std::decay_t<T>(std::move(x)); }
+
+// 按 64 位键的高 32 位（只看低 bits 位）做 LSD 基数排序，稳定
+inline void radixHigh(std::vector<uint64_t>& a, std::vector<uint64_t>& tmp, int bits) {
+    tmp.resize(a.size());
+    for (int shift = 32; shift < 32 + bits; shift += 11) {
+        uint32_t cnt[2049] = {};
+        for (uint64_t k : a) cnt[((k >> shift) & 2047) + 1]++;
+        for (int i = 0; i < 2048; i++) cnt[i + 1] += cnt[i];
+        for (uint64_t k : a) tmp[cnt[(k >> shift) & 2047]++] = k;
+        a.swap(tmp);
+    }
+}
+
+// resize 时不清零的分配器：大数组（上亿个元素）随后会被并行写满，先单线程清零一遍纯属浪费
+template <class T>
+struct NoInit : std::allocator<T> {
+    template <class U> struct rebind { using other = NoInit<U>; };
+    NoInit() = default;
+    template <class U> NoInit(const NoInit<U>&) noexcept {}
+    template <class U> void construct(U* p) noexcept { ::new (static_cast<void*>(p)) U; }
+    template <class U, class... A> void construct(U* p, A&&... a) { ::new (static_cast<void*>(p)) U(std::forward<A>(a)...); }
+};
+template <class T> using Buf = std::vector<T, NoInit<T>>;
+
+template <class T, class A>
+void parCopy(Buf<T>& dst, const std::vector<T, A>& src, int threads) {
+    dst.resize(src.size());
+    parallelBlocks(src.size(), threads, size_t(threads) * 4,
+                   [&](size_t, size_t b, size_t e) { std::copy(src.begin() + b, src.begin() + e, dst.begin() + b); });
+}
+
 struct Quadric {
     double xx, xy, xz, xw, yy, yz, yw, zz, zw, ww;
     void addPlane(double a, double b, double c, double d, double w) {
@@ -108,12 +152,12 @@ enum : uint8_t { LOCKED = 1, BORDER = 2, DEAD = 4, PERMLOCK = 8 };
 
 // 一遍处理用的全局网格（只含存活的顶点和三角形）
 struct Ctx {
-    std::vector<float> P;
-    std::vector<Quadric> Q;
-    std::vector<float> Col;   // 4 × nv，可空
-    std::vector<uint8_t> fl;  // BORDER / PERMLOCK
-    std::vector<uint32_t> T;
-    std::vector<uint16_t> G;
+    Buf<float> P;
+    Buf<Quadric> Q;
+    Buf<float> Col;   // 4 × nv，可空
+    Buf<uint8_t> fl;  // BORDER / PERMLOCK
+    Buf<uint32_t> T;
+    Buf<uint16_t> G;
     size_t nv() const { return P.size() / 3; }
     size_t nt() const { return T.size() / 3; }
 };
@@ -163,22 +207,42 @@ struct Part {
     std::vector<uint8_t> fl, tdead;
     std::vector<uint32_t> stamp, tri, aS, aN, aC, pool;
     std::vector<uint16_t> grp;
-    std::vector<HeapE> heap;
+    // 堆里只放这一轮会处理的边（代价 ≤ tauCur），其余放在不排序的 over 里，每轮开始时扫一遍：
+    // 过期和已删顶点的条目直接扔掉，够便宜的进堆。以前全放堆里，87% 的出堆是这种垃圾，每次出堆
+    // 都要在超出缓存的堆里下沉，占了折叠循环将近一半的时间。处理顺序和以前一样（只是不再排序永远轮不到的边）。
+    std::vector<HeapE> heap, over;
+    double tauCur = -1;
     size_t alive = 0;
-    std::vector<uint32_t> Tu, Tv, Nu, Nv, tmp;
 
-    void build(const Ctx& g, const uint32_t* tids, size_t m, const std::vector<uint8_t>& seam) {
+    bool valid(const HeapE& e) const { return !((fl[e.a] | fl[e.b]) & DEAD) && stamp[e.a] == e.sa && stamp[e.b] == e.sb; }
+    void push(const HeapE& e) {
+        if (e.cost <= tauCur) heapPush(heap, e);
+        else over.push_back(e);
+    }
+    std::vector<uint32_t> Tu, Tv, Nu, tmp;
+    std::vector<uint32_t> mark;  // nbrsOf / 连接条件用的访问标记，值是 gen
+    uint32_t gen = 0;
+    std::vector<uint64_t> rk, rk2;  // build 里编局部号用
+
+    void build(const Ctx& g, const uint32_t* tids, size_t m, const Buf<uint8_t>& seam) {
         hasCol = !g.Col.empty();
-        gid.resize(m * 3);
+        // 局部编号：(全局号, 角号) 按全局号基数排序，一遍扫出不重复的顶点，局部号按全局号从小到大。
+        // 以前是排序 + 每个角二分查找，占了建堆一半的时间
+        rk.resize(m * 3);
         for (size_t i = 0; i < m; i++)
-            for (int k = 0; k < 3; k++) gid[i * 3 + k] = g.T[size_t(tids[i]) * 3 + k];
-        tri = gid;
-        std::sort(gid.begin(), gid.end());
-        gid.erase(std::unique(gid.begin(), gid.end()), gid.end());
-        gid.shrink_to_fit();
-        for (auto& v : tri) v = uint32_t(std::lower_bound(gid.begin(), gid.end(), v) - gid.begin());
+            for (int k = 0; k < 3; k++) rk[i * 3 + k] = uint64_t(g.T[size_t(tids[i]) * 3 + k]) << 32 | uint32_t(i * 3 + k);
+        int bits = 1;
+        while ((size_t(1) << bits) < g.nv()) bits++;
+        radixHigh(rk, rk2, bits);
+        gid.clear();
+        tri.resize(m * 3);
+        for (uint64_t key : rk) {
+            uint32_t v = uint32_t(key >> 32);
+            if (gid.empty() || gid.back() != v) gid.push_back(v);
+            tri[uint32_t(key)] = uint32_t(gid.size() - 1);
+        }
         size_t n = gid.size();
-        pos.resize(n * 3); Q.resize(n); fl.resize(n); stamp.assign(n, 0);
+        pos.resize(n * 3); Q.resize(n); fl.resize(n); stamp.assign(n, 0); mark.assign(n, 0); gen = 0;
         if (hasCol) col.resize(n * 4);
         for (size_t i = 0; i < n; i++) {
             uint32_t v = gid[i];
@@ -198,18 +262,20 @@ struct Part {
         pool.resize(s);
         for (size_t t = 0; t < m; t++)
             for (int k = 0; k < 3; k++) { uint32_t v = tri[t * 3 + k]; pool[aS[v] + aN[v]++] = uint32_t(t); }
-        // 初始边
+        // 初始边：先全放进 over，第一轮 run 再挑出够便宜的建堆
         heap.clear();
-        heap.reserve(n * 3);
+        over.clear();
+        over.reserve(n * 3);
+        tauCur = -1;
         for (uint32_t a = 0; a < n; a++) {
-            neighbors(a, Nu);
+            trisOf(a, Tu);
+            nbrsOf(a, Tu, Nu);
             for (uint32_t b : Nu) {
                 if (b < a) continue;
                 uint32_t u, v; double x[3], c;
-                if (plan(a, b, u, v, x, c)) heap.push_back({float(c), a, b, 0, 0});
+                if (plan(a, b, u, v, x, c)) over.push_back({float(c), a, b, 0, 0});
             }
         }
-        heapMake(heap);
     }
 
     void trisOf(uint32_t v, std::vector<uint32_t>& out) {
@@ -220,13 +286,15 @@ struct Part {
         aN[v] = w;
     }
 
-    void neighbors(uint32_t v, std::vector<uint32_t>& out) {
-        trisOf(v, tmp);
+    // v 的邻点（不重复），T 是 v 现在的三角形（trisOf 的结果）。用 mark 去重，不排序
+    void nbrsOf(uint32_t v, const std::vector<uint32_t>& T, std::vector<uint32_t>& out) {
         out.clear();
-        for (uint32_t t : tmp)
-            for (int k = 0; k < 3; k++) { uint32_t w = tri[t * 3 + k]; if (w != v) out.push_back(w); }
-        std::sort(out.begin(), out.end());
-        out.erase(std::unique(out.begin(), out.end()), out.end());
+        uint32_t g = ++gen;
+        for (uint32_t t : T)
+            for (int k = 0; k < 3; k++) {
+                uint32_t w = tri[t * 3 + k];
+                if (w != v && mark[w] != g) { mark[w] = g; out.push_back(w); }
+            }
     }
 
     void setAdj(uint32_t v, const std::vector<uint32_t>& L) {
@@ -249,8 +317,20 @@ struct Part {
         Quadric q = Q[u] + Q[v];
         const float* pu = &pos[size_t(u) * 3];
         const float* pv = &pos[size_t(v) * 3];
+        double dc = 0;  // 两端颜色差²（0–255 单位）
+        if (hasCol && opt->colorWeight > 0) {
+            const float* cu = &col[size_t(u) * 4];
+            const float* cv = &col[size_t(v) * 4];
+            for (int j = 0; j < 3; j++) dc += (double(cu[j]) - cv[j]) * (double(cu[j]) - cv[j]);
+        }
         if (fl[u] & LOCKED) {
             x[0] = pu[0]; x[1] = pu[1]; x[2] = pu[2];
+        } else if (dc > 32.0 * 32.0) {
+            // 跨颜色边界：只能落在某个端点上，并带走它的颜色（collapse 里按投影插值，正好取到端点色），
+            // 不在中间新造一个混色的点，否则黑白边界会一圈圈糊成灰色
+            bool toV = q.eval(pv[0], pv[1], pv[2]) < q.eval(pu[0], pu[1], pu[2]);
+            const float* p = toV ? pv : pu;
+            x[0] = p[0]; x[1] = p[1]; x[2] = p[2];
         } else {
             double m[3] = {(pu[0] + pv[0]) * 0.5, (pu[1] + pv[1]) * 0.5, (pu[2] + pv[2]) * 0.5};
             double e[3] = {double(pv[0]) - pu[0], double(pv[1]) - pu[1], double(pv[2]) - pu[2]};
@@ -268,6 +348,13 @@ struct Part {
             }
         }
         cost = std::max(0.0, q.eval(x[0], x[1], x[2]));
+        if (dc > 0) {
+            // 颜色代价 = 权重 × 颜色差² × 边长⁴：和几何代价（面积 × 距离²）同量纲，
+            // 相当于把颜色差 1（0–1 归一）的边看成偏离了 √权重 × 边长
+            double e[3] = {double(pv[0]) - pu[0], double(pv[1]) - pu[1], double(pv[2]) - pu[2]};
+            double L2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+            cost += opt->colorWeight * dc / (255.0 * 255.0) * L2 * L2;
+        }
         return true;
     }
 
@@ -302,14 +389,17 @@ struct Part {
         for (uint32_t t : Tv) shared += has(t, u);
         if (shared == 0 || shared > 2) return 0;
         if ((fl[u] & BORDER) && (fl[v] & BORDER) && shared == 2) return 0;
-        neighbors(u, Nu);
-        neighbors(v, Nv);
+        // 连接条件：u、v 的公共邻点数必须等于共有三角形数。先标出 u 的邻点，再数 v 的邻点里有几个被标过
+        nbrsOf(u, Tu, Nu);
+        uint32_t gu = gen, gv = ++gen;
         int common = 0;
-        for (size_t i = 0, j = 0; i < Nu.size() && j < Nv.size();) {
-            if (Nu[i] < Nv[j]) i++;
-            else if (Nu[i] > Nv[j]) j++;
-            else { common++; i++; j++; }
-        }
+        for (uint32_t t : Tv)
+            for (int k = 0; k < 3; k++) {
+                uint32_t w = tri[t * 3 + k];
+                if (w == v || w == u || mark[w] == gv) continue;
+                common += mark[w] == gu;
+                mark[w] = gv;
+            }
         if (common != shared) return 0;
         for (uint32_t t : Tv) if (!has(t, u) && !flipOk(t, v, x)) return 0;
         for (uint32_t t : Tu) if (!has(t, v) && !flipOk(t, u, x)) return 0;
@@ -337,11 +427,11 @@ struct Part {
         fl[v] |= DEAD;
         stamp[u]++;
         alive -= shared;
-        neighbors(u, Nu);
+        nbrsOf(u, tmp, Nu);  // tmp 正好是 u 现在的三角形
         for (uint32_t w : Nu) {
             uint32_t a, b; double y[3], c;
             if (plan(u, w, a, b, y, c)) {
-                heapPush(heap, {float(c), u, w, stamp[u], stamp[w]});
+                push({float(c), u, w, stamp[u], stamp[w]});
             }
         }
         return shared;
@@ -352,12 +442,23 @@ struct Part {
         size_t removed = 0;
         int64_t pending = 0;
         bool stop = budget.load(std::memory_order_relaxed) <= 0;
+        if (tau > tauCur) {
+            // 新一轮：over 里过期的扔掉，够便宜的进堆（τ 只升不降，堆里剩下的仍然 ≤ τ）
+            tauCur = tau;
+            size_t w = 0, h0 = heap.size();
+            for (const HeapE& e : over) {
+                if (!valid(e)) continue;
+                if (e.cost <= tauCur) heap.push_back(e);
+                else over[w++] = e;
+            }
+            over.resize(w);
+            if (heap.size() > h0) heapMake(heap);
+        }
         while (!stop && !heap.empty()) {
             if (heap.front().cost > tau) break;
             HeapE e = heap.front();
             heapPop(heap);
-            if ((fl[e.a] | fl[e.b]) & DEAD) continue;
-            if (stamp[e.a] != e.sa || stamp[e.b] != e.sb) continue;
+            if (!valid(e)) continue;
             uint32_t u, v; double x[3], c;
             if (!plan(e.a, e.b, u, v, x, c)) continue;
             int r = collapse(u, v, x);
@@ -376,9 +477,7 @@ struct Part {
             gRemoved.fetch_add(pending, std::memory_order_relaxed);
         }
         if (heap.size() > 4 * (alive * 3 / 2) + 1024) {  // 过期条目太多时清理
-            std::erase_if(heap, [&](const HeapE& h) {
-                return ((fl[h.a] | fl[h.b]) & DEAD) || stamp[h.a] != h.sa || stamp[h.b] != h.sb;
-            });
+            std::erase_if(heap, [&](const HeapE& h) { return !valid(h); });
             heapMake(heap);
         }
         return removed;
@@ -387,30 +486,35 @@ struct Part {
 
 inline Ctx makeCtx(const Mesh& m, const DecimateOptions& o, int threads) {
     Ctx g;
-    g.P = m.P;
-    g.T = m.T;
-    g.G = m.G;
+    parCopy(g.P, m.P, threads);
+    parCopy(g.T, m.T, threads);
+    parCopy(g.G, m.G, threads);
     size_t nv = m.nv(), nt = m.nt();
     if (!m.C.empty()) {
         g.Col.resize(nv * 4);
-        for (size_t i = 0; i < nv; i++) {
+        parallelFor(nv, threads, 65536, [&](size_t i) {
             uint32_t c = m.C[i];
             g.Col[i * 4] = float(c >> 16 & 255); g.Col[i * 4 + 1] = float(c >> 8 & 255);
             g.Col[i * 4 + 2] = float(c & 255); g.Col[i * 4 + 3] = float(c >> 24);
-        }
+        });
     }
-    // 顶点 → 三角形（CSR）
-    std::vector<uint32_t> start(nv + 1, 0), list(nt * 3);
-    for (auto v : g.T) start[v + 1]++;
+    // 顶点 → 三角形（CSR）：并行计数、并行填（原子加），再把每个顶点的列表排序，顺序和串行填的一样
+    std::vector<uint32_t> start(nv + 1, 0);
+    Buf<uint32_t> list(nt * 3);
+    parallelFor(nt * 3, threads, 65536, [&](size_t i) { std::atomic_ref<uint32_t>(start[g.T[i] + 1]).fetch_add(1, std::memory_order_relaxed); });
     for (size_t i = 0; i < nv; i++) start[i + 1] += start[i];
     {
-        std::vector<uint32_t> fill(start.begin(), start.end() - 1);
-        for (size_t t = 0; t < nt; t++)
-            for (int k = 0; k < 3; k++) list[fill[g.T[t * 3 + k]]++] = uint32_t(t);
+        Buf<uint32_t> fill(nv);
+        parallelFor(nv, threads, 65536, [&](size_t v) { fill[v] = start[v]; });
+        parallelFor(nt * 3, threads, 65536, [&](size_t i) {
+            list[std::atomic_ref<uint32_t>(fill[g.T[i]]).fetch_add(1, std::memory_order_relaxed)] = uint32_t(i / 3);
+        });
+        parallelFor(nv, threads, 4096, [&](size_t v) { std::sort(list.begin() + start[v], list.begin() + start[v + 1]); });
     }
-    g.Q.assign(nv, Quadric{});
-    g.fl.assign(nv, 0);
+    g.Q.resize(nv);   // 下面的并行循环会写满
+    g.fl.resize(nv);
     bool groups = o.groupWeight > 0 && !g.G.empty();
+    bool colorEdge = o.colorEdge > 0 && !g.Col.empty();
     parallelFor(nv, threads, 4096, [&](size_t v) {
         Quadric q{};
         struct E { uint32_t w, t; };
@@ -464,6 +568,27 @@ inline Ctx makeCtx(const Mesh& m, const DecimateOptions& o, int threads) {
                 edgePlane(ep[i].w, ep[i].t, o.groupWeight);
                 edgePlane(ep[i].w, ep[i + 1].t, o.groupWeight);
             }
+            if (colorEdge) {
+                // 这条边跨颜色边界：加一个法向沿边（切平面内）的平面，点往边界方向挪就有代价
+                uint32_t w = ep[i].w;
+                double dc = 0;
+                for (int c = 0; c < 3; c++) dc += (double(g.Col[v * 4 + c]) - g.Col[w * 4 + c]) * (double(g.Col[v * 4 + c]) - g.Col[w * 4 + c]);
+                if (dc > 32.0 * 32.0) {
+                    const float* pw = P + size_t(w) * 3;
+                    double e[3] = {double(pw[0]) - pv[0], double(pw[1]) - pv[1], double(pw[2]) - pv[2]};
+                    double n[3];
+                    tnorm(ep[i].t, n);
+                    double nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                    double en = nl > 0 ? (e[0] * n[0] + e[1] * n[1] + e[2] * n[2]) / (nl * nl) : 0;
+                    double a[3] = {e[0] - en * n[0], e[1] - en * n[1], e[2] - en * n[2]};
+                    double al = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+                    if (al > 0) {
+                        for (auto& c : a) c /= al;
+                        double L2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
+                        q.addPlane(a[0], a[1], a[2], -(a[0] * pv[0] + a[1] * pv[1] + a[2] * pv[2]), o.colorEdge * L2 * dc / (255.0 * 255.0));
+                    }
+                }
+            }
             i = j;
         }
         g.Q[v] = q;
@@ -508,6 +633,10 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
     Ctx g = makeCtx(in, o, threads);
     st.setup = secs(t0);
     size_t target = std::max<size_t>(o.targetTris, 4);
+    // 这些跨遍复用（块的数组按容量复用，不用每遍释放再重新申请、重新触发缺页）
+    std::vector<Part> parts;
+    Buf<uint32_t> chunkOf, owner, tids, seamId;
+    Buf<uint8_t> seam;
 
     for (int pi = 0; g.nt() > target && pi < 64; pi++) {
         if (gCancel.load()) throw Cancelled();
@@ -516,54 +645,98 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
         size_t pre = size_t(target * (1 + o.slack));
         size_t goal = threads > 1 && nt > pre ? std::max(pre, size_t(nt * o.keep)) : target;
         // ---- 切块：块数从 threads×chunksPerThread 开始，接缝点太多就少切
-        std::vector<uint32_t> chunkOf(nt, 0);
-        std::vector<uint8_t> seam(nv, 0);
-        size_t nparts = 1, nseam = 0;
+        // 下面每一步都按三角形 / 顶点并行，结果和线程调度无关
+        chunkOf.resize(nt);
+        seam.resize(nv);
+        size_t nparts = 1, nseam = 0, nb = size_t(threads) * 4;
         bool single = threads == 1 || nt < 20000;
         float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
-        if (!single)
-            for (size_t i = 0; i < nv; i++)
-                for (int j = 0; j < 3; j++) { lo[j] = std::min(lo[j], g.P[i * 3 + j]); hi[j] = std::max(hi[j], g.P[i * 3 + j]); }
+        if (!single) {
+            std::vector<float> bb(nb * 6);
+            parallelBlocks(nv, threads, nb, [&](size_t b, size_t s, size_t e) {
+                float l[3] = {1e30f, 1e30f, 1e30f}, h[3] = {-1e30f, -1e30f, -1e30f};
+                for (size_t i = s; i < e; i++)
+                    for (int j = 0; j < 3; j++) { l[j] = std::min(l[j], g.P[i * 3 + j]); h[j] = std::max(h[j], g.P[i * 3 + j]); }
+                for (int j = 0; j < 3; j++) { bb[b * 6 + j] = l[j]; bb[b * 6 + 3 + j] = h[j]; }
+            });
+            for (size_t b = 0; b < nb; b++)
+                for (int j = 0; j < 3; j++) { lo[j] = std::min(lo[j], bb[b * 6 + j]); hi[j] = std::max(hi[j], bb[b * 6 + 3 + j]); }
+            owner.resize(nv);
+        }
         for (size_t want = std::max(size_t(threads) * o.chunksPerThread, nt / std::max<size_t>(o.partTris, 1)); !single;) {
             double cell = pickCell(g, lo, hi, want);
             double off = (pi & 1) * 0.5 * cell;
             int dim[3];
             for (int j = 0; j < 3; j++) dim[j] = int((hi[j] - lo[j] + off) / cell) + 1;
-            std::vector<uint32_t> denseOf(size_t(dim[0]) * dim[1] * dim[2], UINT32_MAX);
-            nparts = 0;
-            for (size_t t = 0; t < nt; t++) {
+            size_t ncell = size_t(dim[0]) * dim[1] * dim[2];
+            if (ncell >= UINT32_MAX) throw std::runtime_error("切块失败：格子太多");
+            // 三角形重心所在的格子；用到的格子按格子编号顺序编成块号
+            std::vector<uint32_t> denseOf(ncell, UINT32_MAX);
+            parallelFor(nt, threads, 65536, [&](size_t t) {
                 int c[3];
                 for (int j = 0; j < 3; j++) {
                     float ctr = (g.P[g.T[t * 3] * 3 + j] + g.P[g.T[t * 3 + 1] * 3 + j] + g.P[g.T[t * 3 + 2] * 3 + j]) / 3;
                     c[j] = std::clamp(int((ctr - lo[j] + off) / cell), 0, dim[j] - 1);
                 }
-                uint32_t& d = denseOf[(size_t(c[0]) * dim[1] + c[1]) * dim[2] + c[2]];
-                if (d == UINT32_MAX) d = uint32_t(nparts++);
-                chunkOf[t] = d;
-            }
-            std::fill(seam.begin(), seam.end(), 0);
-            std::vector<uint32_t> owner(nv, UINT32_MAX);
-            for (size_t t = 0; t < nt; t++)
+                uint32_t k = uint32_t((size_t(c[0]) * dim[1] + c[1]) * dim[2] + c[2]);
+                chunkOf[t] = k;
+                std::atomic_ref<uint32_t>(denseOf[k]).store(0, std::memory_order_relaxed);
+            });
+            nparts = 0;
+            for (auto& d : denseOf) if (d != UINT32_MAX) d = uint32_t(nparts++);
+            parallelFor(nt, threads, 65536, [&](size_t t) { chunkOf[t] = denseOf[chunkOf[t]]; });
+            // 接缝点：碰到两个以上块的顶点。owner 记第一个抢到的块，之后来的不是同一块就标接缝
+            parallelFor(nv, threads, 65536, [&](size_t v) { owner[v] = UINT32_MAX; seam[v] = 0; });
+            parallelFor(nt, threads, 65536, [&](size_t t) {
+                uint32_t c = chunkOf[t];
                 for (int k = 0; k < 3; k++) {
                     uint32_t v = g.T[t * 3 + k];
-                    if (owner[v] == UINT32_MAX) owner[v] = chunkOf[t];
-                    else if (owner[v] != chunkOf[t]) seam[v] = 1;
+                    std::atomic_ref<uint32_t> ow(owner[v]);
+                    uint32_t cur = ow.load(std::memory_order_relaxed);
+                    if (cur == c) continue;
+                    if (cur == UINT32_MAX && ow.compare_exchange_strong(cur, c, std::memory_order_relaxed)) continue;
+                    if (cur != c) std::atomic_ref<uint8_t>(seam[v]).store(1, std::memory_order_relaxed);
                 }
+            });
+            std::vector<size_t> cnt(nb, 0);
+            parallelBlocks(nv, threads, nb, [&](size_t b, size_t s, size_t e) {
+                size_t k = 0;
+                for (size_t v = s; v < e; v++) k += seam[v];
+                cnt[b] = k;
+            });
             nseam = 0;
-            for (auto s : seam) nseam += s;
+            for (size_t k : cnt) nseam += k;
             if (nseam <= o.seamShare * goal / 2) break;
             want = want * 6 / 10;
             if (want < 2) single = true;
         }
-        if (single) { nparts = 1; nseam = 0; std::fill(chunkOf.begin(), chunkOf.end(), 0); std::fill(seam.begin(), seam.end(), 0); }
+        if (single) {
+            nparts = 1;
+            nseam = 0;
+            parallelFor(nt, threads, 65536, [&](size_t t) { chunkOf[t] = 0; });
+            parallelFor(nv, threads, 65536, [&](size_t v) { seam[v] = 0; });
+        }
         PassStat ps;
         ps.fromTris = nt; ps.goal = goal; ps.parts = nparts; ps.seamVerts = nseam;
-        std::vector<uint32_t> pstart(nparts + 1, 0), tids(nt);
-        for (auto c : chunkOf) pstart[c + 1]++;
-        for (size_t i = 0; i < nparts; i++) pstart[i + 1] += pstart[i];
+        // 按块号做计数排序（分段计数再并行填），每块里的三角形仍按编号从小到大
+        std::vector<uint32_t> pstart(nparts + 1, 0);
+        tids.resize(nt);
         {
-            std::vector<uint32_t> fill(pstart.begin(), pstart.end() - 1);
-            for (size_t t = 0; t < nt; t++) tids[fill[chunkOf[t]]++] = uint32_t(t);
+            std::vector<uint32_t> cnt(nb * nparts, 0);
+            parallelBlocks(nt, threads, nb, [&](size_t b, size_t s, size_t e) {
+                uint32_t* c = &cnt[b * nparts];
+                for (size_t t = s; t < e; t++) c[chunkOf[t]]++;
+            });
+            uint32_t run = 0;
+            for (size_t p = 0; p < nparts; p++) {
+                pstart[p] = run;
+                for (size_t b = 0; b < nb; b++) { uint32_t k = cnt[b * nparts + p]; cnt[b * nparts + p] = run; run += k; }
+            }
+            pstart[nparts] = run;
+            parallelBlocks(nt, threads, nb, [&](size_t b, size_t s, size_t e) {
+                uint32_t* c = &cnt[b * nparts];
+                for (size_t t = s; t < e; t++) tids[c[chunkOf[t]]++] = uint32_t(t);
+            });
         }
         // 大块先做
         std::vector<uint32_t> order(nparts);
@@ -571,7 +744,7 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
         std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return pstart[a + 1] - pstart[a] > pstart[b + 1] - pstart[b]; });
         ps.cut = secs(tp);
         auto tb = Clock::now();
-        std::vector<Part> parts(nparts);
+        if (parts.size() < nparts) parts.resize(nparts);
         parallelFor(nparts, threads, 1, [&](size_t i) {
             uint32_t p = order[i];
             parts[p].opt = &o;
@@ -588,9 +761,10 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
             else {
                 std::vector<float> smp;
                 size_t per = std::max<size_t>(16, 65536 / nparts);
-                for (auto& p : parts) {
-                    size_t n = p.heap.size(), step = std::max<size_t>(1, n / per);
-                    for (size_t i = 0; i < n; i += step) smp.push_back(p.heap[i].cost);
+                for (size_t pi2 = 0; pi2 < nparts; pi2++) {
+                    const Part& p = parts[pi2];
+                    size_t nh = p.heap.size(), n = nh + p.over.size(), step = std::max<size_t>(1, n / per);
+                    for (size_t i = 0; i < n; i += step) smp.push_back(i < nh ? p.heap[i].cost : p.over[i - nh].cost);
                 }
                 if (smp.empty()) break;
                 double q = std::clamp(0.6 * double(cur - goal) / 2 / (1.5 * cur), 1e-4, 0.95);
@@ -612,14 +786,17 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
         ps.time = secs(tp);
         // ---- 合并成新的全局网格
         auto tm = Clock::now();
-        std::vector<uint32_t> seamId(nv, UINT32_MAX);
+        seamId.resize(nv);  // 只有接缝点的位置有意义
         uint32_t ns = 0;
         for (size_t v = 0; v < nv; v++) if (seam[v]) seamId[v] = ns++;
         std::vector<size_t> vOff(nparts + 1, ns), tOff(nparts + 1, 0);
-        for (size_t p = 0; p < nparts; p++) {
+        parallelFor(nparts, threads, 1, [&](size_t p) {
             size_t a = 0;
             for (size_t i = 0; i < parts[p].gid.size(); i++) a += !(parts[p].fl[i] & DEAD) && !seam[parts[p].gid[i]];
-            vOff[p + 1] = vOff[p] + a;
+            vOff[p + 1] = a;
+        });
+        for (size_t p = 0; p < nparts; p++) {
+            vOff[p + 1] += vOff[p];
             tOff[p + 1] = tOff[p] + parts[p].alive;
         }
         Ctx h;
@@ -627,20 +804,24 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
         h.P.resize(NV * 3); h.Q.resize(NV); h.fl.resize(NV); h.T.resize(NT * 3);
         if (!g.Col.empty()) h.Col.resize(NV * 4);
         if (!g.G.empty()) h.G.resize(NT);
-        for (size_t v = 0; v < nv; v++)
-            if (seam[v]) {
-                uint32_t s = seamId[v];
-                memcpy(&h.P[s * 3], &g.P[v * 3], 12);
-                if (!g.Col.empty()) memcpy(&h.Col[s * 4], &g.Col[v * 4], 16);
-                h.Q[s] = g.Q[v];
-                h.fl[s] = g.fl[v];
-            }
-        // 接缝点的误差累积：各块里的增量加回去
-        for (size_t p = 0; p < nparts; p++)
+        parallelFor(nv, threads, 65536, [&](size_t v) {
+            if (!seam[v]) return;
+            uint32_t s = seamId[v];
+            memcpy(&h.P[s * 3], &g.P[v * 3], 12);
+            if (!g.Col.empty()) memcpy(&h.Col[s * 4], &g.Col[v * 4], 16);
+            h.Q[s] = g.Q[v];
+            h.fl[s] = g.fl[v];
+        });
+        // 接缝点的误差累积：各块里的增量加回去（并行算增量，再按块号顺序加，和串行的加法顺序一样）
+        std::vector<std::vector<std::pair<uint32_t, Quadric>>> dq(nparts);
+        parallelFor(nparts, threads, 1, [&](size_t p) {
             for (size_t i = 0; i < parts[p].gid.size(); i++) {
                 uint32_t v = parts[p].gid[i];
-                if (seam[v]) h.Q[seamId[v]] += parts[p].Q[i] - g.Q[v];
+                if (seam[v]) dq[p].push_back({seamId[v], parts[p].Q[i] - g.Q[v]});
             }
+        });
+        for (auto& L : dq)
+            for (auto& [s, d] : L) h.Q[s] += d;
         parallelFor(nparts, threads, 1, [&](size_t p) {
             Part& P = parts[p];
             std::vector<uint32_t> nid(P.gid.size(), UINT32_MAX);
@@ -662,30 +843,49 @@ inline Mesh decimate(const Mesh& in, const DecimateOptions& o, DecimateStats& st
                 if (!h.G.empty()) h.G[w] = P.grp[t];
                 w++;
             }
-            std::vector<HeapE>().swap(P.heap);  // 尽早释放
         });
-        g = std::move(h);
+        std::swap(g, h);
+        if (o.fastExit) keepUntilExit(std::move(h));  // 旧网格（第一遍时有几 GB）不在这里释放
         ps.merge = secs(tm);
         st.passes.push_back(ps);
     }
 
-    // 输出：去掉没被用到的顶点
+    // 输出：去掉没被用到的顶点（并行：标出用到的点，按原来的编号顺序编新号）
     Mesh out;
-    std::vector<uint32_t> remap(g.nv(), UINT32_MAX);
-    out.T.resize(g.T.size());
-    for (size_t i = 0; i < g.T.size(); i++) {
-        uint32_t v = g.T[i];
-        if (remap[v] == UINT32_MAX) {
-            remap[v] = uint32_t(out.nv());
-            out.P.insert(out.P.end(), {g.P[v * 3], g.P[v * 3 + 1], g.P[v * 3 + 2]});
+    size_t gnv = g.nv(), nb = size_t(threads) * 4;
+    Buf<uint32_t> remap(gnv);
+    parallelFor(gnv, threads, 65536, [&](size_t v) { remap[v] = 0; });
+    parallelFor(g.T.size(), threads, 65536, [&](size_t i) { std::atomic_ref<uint32_t>(remap[g.T[i]]).store(1, std::memory_order_relaxed); });
+    std::vector<size_t> used(nb + 1, 0);
+    parallelBlocks(gnv, threads, nb, [&](size_t b, size_t s, size_t e) {
+        size_t k = 0;
+        for (size_t v = s; v < e; v++) k += remap[v];
+        used[b + 1] = k;
+    });
+    for (size_t b = 0; b < nb; b++) used[b + 1] += used[b];
+    out.P.resize(used[nb] * 3);
+    if (!g.Col.empty()) out.C.resize(used[nb]);
+    parallelBlocks(gnv, threads, nb, [&](size_t b, size_t s, size_t e) {
+        uint32_t k = uint32_t(used[b]);
+        for (size_t v = s; v < e; v++) {
+            if (!remap[v]) { remap[v] = UINT32_MAX; continue; }
+            remap[v] = k;
+            memcpy(&out.P[size_t(k) * 3], &g.P[v * 3], 12);
             if (!g.Col.empty()) {
                 auto c8 = [&](int j) { return uint32_t(std::clamp(int(std::lround(g.Col[v * 4 + j])), 0, 255)); };
-                out.C.push_back(c8(3) << 24 | c8(0) << 16 | c8(1) << 8 | c8(2));
+                out.C[k] = c8(3) << 24 | c8(0) << 16 | c8(1) << 8 | c8(2);
             }
+            k++;
         }
-        out.T[i] = remap[v];
-    }
-    out.G = g.G;
+    });
+    out.T.resize(g.T.size());
+    parallelFor(g.T.size(), threads, 65536, [&](size_t i) { out.T[i] = remap[g.T[i]]; });
+    out.G.assign(g.G.begin(), g.G.end());
     out.gozHead = in.gozHead;
+    if (o.fastExit) {
+        keepUntilExit(std::move(parts));
+        keepUntilExit(std::move(chunkOf)); keepUntilExit(std::move(owner)); keepUntilExit(std::move(tids));
+        keepUntilExit(std::move(seamId)); keepUntilExit(std::move(seam)); keepUntilExit(std::move(g));
+    }
     return out;
 }

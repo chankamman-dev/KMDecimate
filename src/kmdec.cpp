@@ -1,11 +1,11 @@
 // KMDecimate 命令行原型：读模型 → 减面 → 写模型，并打印各阶段耗时。
 // 用法：kmdec 输入.obj|.GoZ|.stl 输出.obj|.GoZ [--percent 10 | --tris N | --verts N]
-//        [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W]
+//        [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W] [--color W] [--coloredge W]
 #include "decimate.h"
 #include <windows.h>
 
 static void usage() {
-    printf("用法：kmdec 输入 输出 [--percent P | --tris N | --verts N] [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W]\n"
+    printf("用法：kmdec 输入 输出 [--percent P | --tris N | --verts N] [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W] [--color W] [--coloredge W]\n"
            "  --threads 1 = 经典单线程 QEM（对照组）；默认用全部逻辑核\n");
 }
 
@@ -66,7 +66,9 @@ struct Monitor {
     }
 };
 
-// ZBrush 插件调用：参数只有一个 job.txt（ASCII 行：KMDEC1 / 输入 / 输出 / 百分比 / 保留组 / 线程数 / END）。
+// ZBrush 插件调用：参数只有一个 job.txt（ASCII 行：KMDEC1 / 输入 / 输出 / 百分比 / 保留组 / 线程数 / 顶点色 / END）。
+// 顶点色：0 = 不保留；1–10 = 保留，数字是“颜色细节”（把多少面让给颜色边界）。0.2 的 job 没有这一行，按 1 处理。
+// 有 C:\Users\Public\KMDecimate\keep_input 这个文件时，把输入另存为 work\last_in.GoZ（拿用户的真实模型调参用）。
 // 同目录写 status.txt（1 成功，8 已取消，9 失败）、note.txt（给 ZBrush 显示的 UTF-8 消息），并追加 log.txt；
 // 计算期间写 progress.bin（见 Monitor）。
 static int runJob(const std::wstring& jobPath) {
@@ -94,13 +96,25 @@ static int runJob(const std::wstring& jobPath) {
         std::wstring in = wide(L[1]), out = wide(L[2]);
         double percent = atof(L[3].c_str());
         DecimateOptions o;
+        o.fastExit = true;  // 减完写出结果就退出
         o.groupWeight = atoi(L[4].c_str()) ? 10 : 0;
         o.threads = atoi(L[5].c_str());
+        double detail = L.size() < 7 || L[6] == "END" ? 1 : atof(L[6].c_str());
+        bool keepColor = detail > 0;
+        if (keepColor) {
+            // 1 → 0.3（0.3 版的取值），10 → 30，按对数均匀；见 README 的“颜色细节”表
+            detail = std::clamp(detail, 1.0, 10.0);
+            o.colorWeight = o.colorEdge = 0.3 * std::pow(10.0, (detail - 1) / 4.5);
+        }
+        if (GetFileAttributesW(L"C:\\Users\\Public\\KMDecimate\\keep_input") != INVALID_FILE_ATTRIBUTES)
+            CopyFileW(in.c_str(), (dir + L"last_in.GoZ").c_str(), FALSE);
 
         auto t0 = kmd::Clock::now();
         Mesh m = loadMesh(in);
         double tLoad = kmd::secs(t0);
         if (m.nt() == 0) throw std::runtime_error("导出的模型是空的");
+        bool hadColor = !m.C.empty();
+        if (!keepColor) m.C.clear();  // 只按形状减，结果不带 Polypaint
         if (kmd::gCancel) throw kmd::Cancelled();
         o.targetTris = size_t(std::max(4.0, m.nt() * percent / 100));
         mon.toRemove = m.nt() > o.targetTris ? m.nt() - o.targetTris : 1;
@@ -115,10 +129,11 @@ static int runJob(const std::wstring& jobPath) {
         saveMesh(out, r);
         double tSave = kmd::secs(t2);
         char note[512], log[512];
-        snprintf(note, sizeof note, "KM 减面：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）", m.nt(), r.nt(), r.nv(),
-                 tDec, tLoad, tSave, st.threads);
-        snprintf(log, sizeof log, "%s percent=%g groups=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d\r\n",
-                 L[1].c_str(), percent, o.groupWeight > 0, m.nt(), r.nt(), tLoad, tDec, tSave, st.passes.size(), st.threads);
+        snprintf(note, sizeof note, "KM 减面：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）%s", m.nt(), r.nt(), r.nv(),
+                 tDec, tLoad, tSave, st.threads, !hadColor ? "" : keepColor ? "，保留了顶点色" : "，去掉了顶点色");
+        snprintf(log, sizeof log,
+                 "%s percent=%g groups=%d color=%g had_color=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d\r\n",
+                 L[1].c_str(), percent, o.groupWeight > 0, keepColor ? detail : 0.0, hadColor, m.nt(), r.nt(), tLoad, tDec, tSave, st.passes.size(), st.threads);
         finish("1", note, log);
         return 0;
     } catch (kmd::Cancelled&) {
@@ -139,6 +154,7 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring inPath = argv[1], outPath = argv[2];
     double percent = 10, tris = 0, verts = 0;
     DecimateOptions o;
+    o.fastExit = true;  // 命令行减完写出结果就退出
     for (int i = 3; i + 1 < argc; i += 2) {
         std::wstring k = argv[i];
         double v = _wtof(argv[i + 1]);
@@ -153,6 +169,8 @@ int wmain(int argc, wchar_t** argv) {
         else if (k == L"--seam") o.seamShare = v;
         else if (k == L"--border") o.borderWeight = v;
         else if (k == L"--groups") o.groupWeight = v;
+        else if (k == L"--color") o.colorWeight = v;
+        else if (k == L"--coloredge") o.colorEdge = v;
         else { usage(); return 1; }
     }
     try {

@@ -2,12 +2,14 @@
 // 只保留减面需要的东西：顶点、三角形、逐顶点颜色、逐面组。四边形和多边形按扇形拆成三角形。
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -32,6 +34,20 @@ inline std::string toUtf8(const std::wstring& w) {
         else { s += char(0xF0 | c >> 18); s += char(0x80 | (c >> 12 & 63)); s += char(0x80 | (c >> 6 & 63)); s += char(0x80 | (c & 63)); }
     }
     return s;
+}
+
+// 把 [0, n) 分成 nb 段并行处理 f(段号, 起, 止)：读写大模型用。段数固定，结果和线程调度无关
+template <class F>
+void ioBlocks(size_t n, size_t nb, F&& f) {
+    size_t T = std::min<size_t>(nb, std::max(1u, std::thread::hardware_concurrency()));
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+        for (size_t b; (b = next++) < nb;) f(b, n * b / nb, n * (b + 1) / nb);
+    };
+    std::vector<std::thread> ts;
+    for (size_t i = 1; i < T; i++) ts.emplace_back(work);
+    work();
+    for (auto& t : ts) t.join();
 }
 
 inline std::vector<char> readAll(const std::wstring& path) {
@@ -188,7 +204,9 @@ inline Mesh readGoz(const std::vector<char>& d) {
     std::vector<uint16_t> faceGroups;
     auto u32 = [&](size_t o) { uint32_t v; memcpy(&v, d.data() + o, 4); return v; };
     auto u64 = [&](size_t o) { uint64_t v; memcpy(&v, d.data() + o, 8); return v; };
-    std::vector<uint32_t> trisPerFace;
+    std::vector<uint8_t> trisPerFace;          // 每个面拆成几个三角形（1 或 2）
+    const size_t fb = 256;                     // 面按段并行处理，fOff[段] = 这段第一个三角形的序号
+    std::vector<size_t> fOff(fb + 1, 0);
     while (pos + 8 <= d.size()) {
         uint32_t tag = u32(pos), size = u32(pos + 4);
         if (tag == 0 || size < 8) break;
@@ -200,21 +218,37 @@ inline Mesh readGoz(const std::vector<char>& d) {
         } else if (tag == goz::Faces) {
             uint64_t n = u64(body);
             const char* f = d.data() + body + 8;
-            m.T.reserve(n * 6);
+            // 四边形拆成两个三角形。并行：分段数三角形，前缀和定位，再并行写
             trisPerFace.resize(n);
-            for (uint64_t i = 0; i < n; i++) {
-                uint32_t q[4];
-                memcpy(q, f + i * 16, 16);
-                m.T.insert(m.T.end(), {q[0], q[1], q[2]});
-                trisPerFace[i] = 1;
-                if (q[3] != 0xFFFFFFFFu) { m.T.insert(m.T.end(), {q[0], q[2], q[3]}); trisPerFace[i] = 2; }
-            }
+            ioBlocks(n, fb, [&](size_t b, size_t s, size_t e) {
+                size_t k = 0;
+                for (size_t i = s; i < e; i++) {
+                    uint32_t q3;
+                    memcpy(&q3, f + i * 16 + 12, 4);
+                    trisPerFace[i] = q3 != 0xFFFFFFFFu ? 2 : 1;
+                    k += trisPerFace[i];
+                }
+                fOff[b + 1] = k;
+            });
+            for (size_t b = 0; b < fb; b++) fOff[b + 1] += fOff[b];
+            m.T.resize(fOff[fb] * 3);
+            ioBlocks(n, fb, [&](size_t b, size_t s, size_t e) {
+                uint32_t* t = m.T.data() + fOff[b] * 3;
+                for (size_t i = s; i < e; i++) {
+                    uint32_t q[4];
+                    memcpy(q, f + i * 16, 16);
+                    *t++ = q[0]; *t++ = q[1]; *t++ = q[2];
+                    if (trisPerFace[i] == 2) { *t++ = q[0]; *t++ = q[2]; *t++ = q[3]; }
+                }
+            });
         } else if (tag == goz::Mrgb) {
             uint32_t n = u32(body);
             const unsigned char* c = (const unsigned char*)d.data() + body + 8;
             m.C.resize(n);
-            for (uint32_t i = 0; i < n; i++)  // 文件里是 B G R M
-                m.C[i] = uint32_t(c[i * 4 + 3]) << 24 | uint32_t(c[i * 4 + 2]) << 16 | uint32_t(c[i * 4 + 1]) << 8 | c[i * 4];
+            ioBlocks(n, 64, [&](size_t, size_t s, size_t e) {
+                for (size_t i = s; i < e; i++)  // 文件里是 B G R M
+                    m.C[i] = uint32_t(c[i * 4 + 3]) << 24 | uint32_t(c[i * 4 + 2]) << 16 | uint32_t(c[i * 4 + 1]) << 8 | c[i * 4];
+            });
         } else if (tag == goz::Groups) {
             uint64_t n = u64(body);
             faceGroups.resize(n);
@@ -225,9 +259,14 @@ inline Mesh readGoz(const std::vector<char>& d) {
         pos += size;
     }
     if (!faceGroups.empty() && faceGroups.size() == trisPerFace.size()) {
-        m.G.reserve(m.nt());
-        for (size_t i = 0; i < trisPerFace.size(); i++)
-            for (uint32_t k = 0; k < trisPerFace[i]; k++) m.G.push_back(faceGroups[i]);
+        m.G.resize(m.nt());
+        ioBlocks(trisPerFace.size(), fb, [&](size_t b, size_t s, size_t e) {
+            uint16_t* gp = m.G.data() + fOff[b];
+            for (size_t i = s; i < e; i++) {
+                *gp++ = faceGroups[i];
+                if (trisPerFace[i] == 2) *gp++ = faceGroups[i];
+            }
+        });
     }
     if (m.C.size() != m.nv()) m.C.clear();
     return m;
@@ -249,11 +288,26 @@ inline std::string writeGoz(const Mesh& m, const std::string& name) {
     }
     u32(goz::Points); u32(uint32_t(16 + m.nv() * 12)); u64(m.nv()); put(m.P.data(), m.nv() * 12);
     u32(goz::Faces); u32(uint32_t(16 + m.nt() * 16)); u64(m.nt());
-    for (size_t t = 0; t < m.nt(); t++) { put(&m.T[t * 3], 12); u32(0xFFFFFFFFu); }
+    // 面和颜色先占好位置再并行填（大模型逐个追加要一秒多）
+    size_t off = s.size();
+    s.resize(off + m.nt() * 16);
+    ioBlocks(m.nt(), 64, [&](size_t, size_t b, size_t e) {
+        char* d = s.data() + off + b * 16;
+        const uint32_t none = 0xFFFFFFFFu;
+        for (size_t t = b; t < e; t++, d += 16) { memcpy(d, &m.T[t * 3], 12); memcpy(d + 12, &none, 4); }
+    });
     if (!m.C.empty()) {
         u32(goz::Mrgb); u32(uint32_t(16 + m.nv() * 4)); u32(uint32_t(m.nv()));
         float one = 1.f; put(&one, 4);
-        for (uint32_t c : m.C) { unsigned char b[4] = {uint8_t(c), uint8_t(c >> 8), uint8_t(c >> 16), uint8_t(c >> 24)}; put(b, 4); }
+        off = s.size();
+        s.resize(off + m.C.size() * 4);
+        ioBlocks(m.C.size(), 64, [&](size_t, size_t b, size_t e) {
+            unsigned char* d = (unsigned char*)s.data() + off + b * 4;
+            for (size_t i = b; i < e; i++, d += 4) {
+                uint32_t c = m.C[i];
+                d[0] = uint8_t(c); d[1] = uint8_t(c >> 8); d[2] = uint8_t(c >> 16); d[3] = uint8_t(c >> 24);
+            }
+        });
     }
     if (!m.G.empty()) { u32(goz::Groups); u32(uint32_t(16 + m.nt() * 2)); u64(m.nt()); put(m.G.data(), m.nt() * 2); }
     s.append(16, '\0');

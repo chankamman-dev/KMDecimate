@@ -1,6 +1,7 @@
 // 量减面质量：两个网格之间的双向表面距离（按面积均匀撒点，找另一个网格上的最近点）。
 // 用法：meshdiff 原模型 减面结果 [--samples N] [--heat 热力图.obj] [--heatmax 绝对距离]
 // 输出均值 / RMS / 99 分位 / 最大值（Hausdorff），同时给出占原模型包围盒对角线的百分比。
+// 两个网格都有 Polypaint 时再量颜色误差：原模型表面撒点插值出颜色，和结果上最近点插值出的颜色比 RGB 距离（0–441）。
 #include "decimate.h"
 #include <random>
 #include <windows.h>
@@ -61,7 +62,7 @@ struct Grid {
     }
 
     // Ericson《Real-Time Collision Detection》5.1.5
-    static double distTri2(const double p[3], const float* A, const float* B, const float* C) {
+    static double distTri2(const double p[3], const float* A, const float* B, const float* C, double* bary = nullptr) {
         double a[3] = {A[0], A[1], A[2]}, b[3] = {B[0], B[1], B[2]}, c[3] = {C[0], C[1], C[2]};
         auto sub = [](const double* x, const double* y, double* r) { r[0] = x[0] - y[0]; r[1] = x[1] - y[1]; r[2] = x[2] - y[2]; };
         auto dot = [](const double* x, const double* y) { return x[0] * y[0] + x[1] * y[1] + x[2] * y[2]; };
@@ -69,6 +70,7 @@ struct Grid {
         sub(b, a, ab); sub(c, a, ac); sub(p, a, ap);
         auto res = [&](double u, double v, double w) {
             for (int j = 0; j < 3; j++) q[j] = a[j] * u + b[j] * v + c[j] * w;
+            if (bary) { bary[0] = u; bary[1] = v; bary[2] = w; }
             double d[3]; sub(p, q, d); return dot(d, d);
         };
         double d1 = dot(ab, ap), d2 = dot(ac, ap);
@@ -89,7 +91,7 @@ struct Grid {
         return res(1 - v - w, v, w);
     }
 
-    double nearest(const double p[3]) const {
+    double nearest(const double p[3], uint32_t* tri = nullptr, double* bary = nullptr) const {
         int64_t c[3];
         for (int j = 0; j < 3; j++) c[j] = int64_t((p[j] - lo[j]) / cell);
         double best = 1e300;
@@ -104,8 +106,13 @@ struct Grid {
                         size_t k = it - keys.begin();
                         for (uint32_t i = start[k]; i < start[k + 1]; i++) {
                             uint32_t t = items[i];
-                            double d = distTri2(p, &m->P[m->T[t * 3] * 3], &m->P[m->T[t * 3 + 1] * 3], &m->P[m->T[t * 3 + 2] * 3]);
-                            best = std::min(best, d);
+                            double bc[3];
+                            double d = distTri2(p, &m->P[m->T[t * 3] * 3], &m->P[m->T[t * 3 + 1] * 3], &m->P[m->T[t * 3 + 2] * 3], bc);
+                            if (d < best) {
+                                best = d;
+                                if (tri) *tri = t;
+                                if (bary) std::copy(bc, bc + 3, bary);
+                            }
                         }
                     }
             if (best < 1e300 && std::sqrt(best) <= r * cell) break;
@@ -114,13 +121,13 @@ struct Grid {
     }
 };
 
-struct Stat { double mean, rms, p99, max; };
+struct Stat { double mean, rms, p99, max, at[3]; };  // at：最大偏差所在的采样点
 
 static Stat sampleDist(const Mesh& a, const Grid& gb, size_t n, int threads) {
     std::vector<double> cdf(a.nt());
     double acc = 0;
     for (size_t t = 0; t < a.nt(); t++) { acc += Grid::triArea(a, t); cdf[t] = acc; }
-    std::vector<double> d(n);
+    std::vector<double> d(n), pos(n * 3);
     kmd::parallelFor(n, threads, 2048, [&](size_t i) {
         std::mt19937_64 rng(i * 0x9E3779B97F4A7C15ull + 1);
         std::uniform_real_distribution<double> U(0, 1);
@@ -134,13 +141,60 @@ static Stat sampleDist(const Mesh& a, const Grid& gb, size_t n, int threads) {
         double p[3];
         for (int j = 0; j < 3; j++) p[j] = A[j] + u * (B[j] - A[j]) + v * (C[j] - A[j]);
         d[i] = gb.nearest(p);
+        std::copy(p, p + 3, &pos[i * 3]);
     });
     Stat s{};
     double sq = 0;
-    for (double x : d) { s.mean += x; sq += x * x; s.max = std::max(s.max, x); }
+    for (size_t i = 0; i < n; i++) {
+        double x = d[i];
+        s.mean += x; sq += x * x;
+        if (x > s.max) { s.max = x; std::copy(&pos[i * 3], &pos[i * 3 + 3], s.at); }
+    }
     s.mean /= n;
     s.rms = std::sqrt(sq / n);
     std::nth_element(d.begin(), d.begin() + size_t(n * 0.99), d.end());
+    s.p99 = d[size_t(n * 0.99)];
+    return s;
+}
+
+// 颜色误差：原模型 a 上按面积撒点，插值出颜色；在结果 b 上找最近点，插值出颜色；比 RGB 距离
+struct ColStat { double mean, p95, p99, over32; };
+
+static void triColor(const Mesh& m, uint32_t t, const double w[3], double out[3]) {
+    out[0] = out[1] = out[2] = 0;
+    for (int k = 0; k < 3; k++) {
+        uint32_t c = m.C[m.T[size_t(t) * 3 + k]];
+        out[0] += w[k] * (c >> 16 & 255); out[1] += w[k] * (c >> 8 & 255); out[2] += w[k] * (c & 255);
+    }
+}
+
+static ColStat sampleColor(const Mesh& a, const Mesh& b, const Grid& gb, size_t n, int threads) {
+    std::vector<double> cdf(a.nt());
+    double acc = 0;
+    for (size_t t = 0; t < a.nt(); t++) { acc += Grid::triArea(a, t); cdf[t] = acc; }
+    std::vector<double> d(n);
+    kmd::parallelFor(n, threads, 2048, [&](size_t i) {
+        std::mt19937_64 rng(i * 0x9E3779B97F4A7C15ull + 7);
+        std::uniform_real_distribution<double> U(0, 1);
+        double r = (i + U(rng)) / n * acc;
+        uint32_t t = uint32_t(std::min(a.nt() - 1, size_t(std::lower_bound(cdf.begin(), cdf.end(), r) - cdf.begin())));
+        double u = U(rng), v = U(rng);
+        if (u + v > 1) { u = 1 - u; v = 1 - v; }
+        double w[3] = {1 - u - v, u, v}, p[3] = {0, 0, 0}, ca[3], cb[3], bw[3] = {1, 0, 0};
+        for (int k = 0; k < 3; k++)
+            for (int j = 0; j < 3; j++) p[j] += w[k] * a.P[a.T[size_t(t) * 3 + k] * 3 + j];
+        uint32_t tb = 0;
+        gb.nearest(p, &tb, bw);
+        triColor(a, t, w, ca);
+        triColor(b, tb, bw, cb);
+        d[i] = std::sqrt((ca[0] - cb[0]) * (ca[0] - cb[0]) + (ca[1] - cb[1]) * (ca[1] - cb[1]) + (ca[2] - cb[2]) * (ca[2] - cb[2]));
+    });
+    ColStat s{};
+    for (double x : d) { s.mean += x; s.over32 += x > 32; }
+    s.mean /= n;
+    s.over32 /= n;
+    std::sort(d.begin(), d.end());
+    s.p95 = d[size_t(n * 0.95)];
     s.p99 = d[size_t(n * 0.99)];
     return s;
 }
@@ -176,9 +230,15 @@ int wmain(int argc, wchar_t** argv) {
                    s.rms, s.rms / diag * 100, s.p99, s.p99 / diag * 100, s.max, s.max / diag * 100);
         };
         pr("结果→原模型", ab);
+        printf("MAXAT result=(%.4f, %.4f, %.4f) %.4e  orig=(%.4f, %.4f, %.4f) %.4e\n", ab.at[0], ab.at[1], ab.at[2], ab.max, ba.at[0], ba.at[1], ba.at[2], ba.max);
         pr("原模型→结果", ba);
         printf("DIFF diag=%.6g mean=%.6e rms=%.6e p99=%.6e hausdorff=%.6e\n", diag, std::max(ab.mean, ba.mean), std::max(ab.rms, ba.rms),
                std::max(ab.p99, ba.p99), std::max(ab.max, ba.max));
+        if (!a.C.empty() && !b.C.empty()) {
+            ColStat c = sampleColor(a, b, gb, samples, threads);
+            printf("颜色误差（RGB 距离，0–441）均值 %.2f  95%% %.1f  99%% %.1f  偏差超过 32 的面积 %.2f%%\n", c.mean, c.p95, c.p99, c.over32 * 100);
+            printf("COLOR mean=%.3f p95=%.2f p99=%.2f over32=%.4f\n", c.mean, c.p95, c.p99, c.over32);
+        }
         if (!heat.empty()) {  // 结果网格按"离原模型多远"上色：蓝 → 绿 → 红
             std::vector<double> vd(b.nv());
             kmd::parallelFor(b.nv(), threads, 1024, [&](size_t i) {
