@@ -2,6 +2,7 @@
 // 用法：kmdec 输入.obj|.GoZ|.stl 输出.obj|.GoZ [--percent 10 | --tris N | --verts N]
 //        [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W] [--color W] [--coloredge W]
 #include "decimate.h"
+#include "update.h"
 #include <windows.h>
 
 static void usage() {
@@ -231,7 +232,7 @@ static int runJob(const std::wstring& jobPath) {
         saveMesh(out, r);
         double tSave = kmd::secs(t2);
         char note[512], log[512];
-        snprintf(note, sizeof note, "KM 减面：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）%s", m.nt(), r.nt(), r.nv(),
+        snprintf(note, sizeof note, "KM减面大王：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）%s", m.nt(), r.nt(), r.nv(),
                  tDec, tLoad, tSave, st.threads, !hadColor ? "" : keepColor ? "，保留了顶点色" : "，去掉了顶点色");
         snprintf(log, sizeof log,
                  "%s percent=%g groups=%d color=%g had_color=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d target=%.0f job=%s\r\n",
@@ -240,10 +241,10 @@ static int runJob(const std::wstring& jobPath) {
         finish("1", note, log);
         return 0;
     } catch (kmd::Cancelled&) {
-        finish("8", "KM 减面：已取消（按了 Esc），模型没有改动。", "cancelled\r\n");
+        finish("8", "KM减面大王：已取消（按了 Esc），模型没有改动。", "cancelled\r\n");
         return 3;
     } catch (std::exception& e) {
-        std::string msg = std::string("KM 减面出错：") + e.what();
+        std::string msg = std::string("KM减面大王出错：") + e.what();
         finish("9", msg, msg + "\r\n");
         return 2;
     }
@@ -252,6 +253,15 @@ static int runJob(const std::wstring& jobPath) {
 int wmain(int argc, wchar_t** argv) {
     SetConsoleOutputCP(CP_UTF8);
     setvbuf(stdout, nullptr, _IOFBF, 1 << 16);
+    // 插件的“检查更新”按钮：参数是 work\update.zvr
+    if (argc == 2) {
+        std::wstring a = argv[1];
+        if (a.size() >= 10 && _wcsicmp(a.c_str() + a.size() - 10, L"update.zvr") == 0) {
+            std::vector<float> v;
+            try { v = readZvr(a); } catch (std::exception&) {}
+            return kmupd::checkUpdate(a, v);
+        }
+    }
     if (argc == 2 && (lowerExt(argv[1]) == L".txt" || lowerExt(argv[1]) == L".zvr")) return runJob(argv[1]);
     if (argc < 3) { usage(); return 1; }
     std::wstring inPath = argv[1], outPath = argv[2];

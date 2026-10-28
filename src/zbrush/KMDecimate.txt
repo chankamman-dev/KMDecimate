@@ -1,4 +1,4 @@
-// KM Decimate 0.3 - fast multi-threaded decimation (prototype, to compare with Decimation Master)
+// KM Decimate 0.3.1 - fast multi-threaded decimation (prototype, to compare with Decimation Master)
 // plus ZRemesh Project: keep the current state as history, ZRemesher to a target, subdivide, project the details back
 // ZBrush 2024 / 2026, ZScript only. Install: copy KMDecimate.txt and the KMDecimate folder into ZStartup\ZPlugs64.
 // ZBrush exports the subtool as GoZ, KMDecimate\KMDecimate.exe decimates it and writes a GoZ back, ZBrush imports it.
@@ -81,6 +81,27 @@
 [VarDef,kdSet4(2),0]
 [VarSet,kdSet4(0),100]
 [If,[FileExists,kdSet4Path],[VarLoad,kdSet4,kdSet4Path]]
+
+// ZBrush 2026 runs this whole script again before every button press, and redefining a switch or slider then
+// disables it and resets it to the value given in its definition. So: the slider values the user just set are read
+// back here, before the definitions; a switch never trusts its own on/off state (both of its commands mean "toggle");
+// kdSyncUI enables the controls again and sets them from the settings. kdBusy stops its ISet calls from running commands.
+[VarDef,kdBusy,0]
+
+// Check Update: the plugin version as numbers, keep it the same as the first line (tools/package.py checks).
+// update.zvr: 0 format 1 / 1-3 version; KMDecimate.exe reads the latest GitHub release and tells the user in a message box
+[VarDef,kdUpdZ,"C:\Users\Public\KMDecimate\work\update.zvr"]
+[VarDef,kdUpd(4),0]
+[VarSet,kdUpd(0),1]
+[VarSet,kdUpd(1),0]
+[VarSet,kdUpd(2),3]
+[VarSet,kdUpd(3),1]
+[If,[IExists,"Zplugin:KM Decimate:Percent"],[VarSet,kdSet(0),[IGet,"Zplugin:KM Decimate:Percent"]]]
+[If,[IExists,"Zplugin:KM Decimate:Color Detail"],[VarSet,kdSet3(1),[IGet,"Zplugin:KM Decimate:Color Detail"]]]
+[If,[IExists,"Zplugin:KM Decimate:Target Polys"],[VarSet,kdSet2(0),[IGet,"Zplugin:KM Decimate:Target Polys"]]]
+[If,[IExists,"Zplugin:KM Decimate:SDiv Levels"],[VarSet,kdSet2(1),[IGet,"Zplugin:KM Decimate:SDiv Levels"]]]
+[If,[IExists,"Zplugin:KM Decimate:Target Faces"],[VarSet,kdSet2(2),[IGet,"Zplugin:KM Decimate:Target Faces"]]]
+[If,[IExists,"Zplugin:KM Decimate:Pre Decimate"],[VarSet,kdSet4(0),[IGet,"Zplugin:KM Decimate:Pre Decimate"]]]
 
 // the job and the ZBrush side timings go to KMDecimate.exe through VarSave: in one ZBrush 2026 session MemSaveToFile
 // stopped writing (job.txt stayed old, the exe ran with old settings) while VarSave kept working
@@ -272,12 +293,38 @@
 	]
 ]
 
-// the switches can stay disabled after a button ran (ZBrush 2024): enable them again
-[RoutineDef,kdEnableUI,
-	[If,[IExists,"Zplugin:KM Decimate:Keep Groups"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Groups"]==0,[IEnable,"Zplugin:KM Decimate:Keep Groups"]]]
-	[If,[IExists,"Zplugin:KM Decimate:Keep Original"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Original"]==0,[IEnable,"Zplugin:KM Decimate:Keep Original"]]]
-	[If,[IExists,"Zplugin:KM Decimate:Keep Polypaint"],[If,[IGetStatus,"Zplugin:KM Decimate:Keep Polypaint"]==0,[IEnable,"Zplugin:KM Decimate:Keep Polypaint"]]]
-	[If,[IExists,"Zplugin:KM Decimate:Use History"],[If,[IGetStatus,"Zplugin:KM Decimate:Use History"]==0,[IEnable,"Zplugin:KM Decimate:Use History"]]]
+// enable a control again (kdTmp = its path)
+[RoutineDef,kdEnable,
+	[If,[IExists,kdTmp],[If,[IGetStatus,kdTmp]==0,[IEnable,kdTmp]]]
+]
+
+// the switches and sliders are disabled after the script ran again (ZBrush 2026, see the top): enable them
+// and show the saved settings
+[RoutineDef,kdSyncUI,
+	[VarSet,kdBusy,1]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Percent"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Groups"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Original"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Keep Polypaint"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Color Detail"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Target Polys"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:SDiv Levels"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Target Faces"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Use History"][RoutineCall,kdEnable]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Pre Decimate"][RoutineCall,kdEnable]
+	[If,[IExists,"Zplugin:KM Decimate:Pre Decimate"],
+		[ISet,"Zplugin:KM Decimate:Percent",kdSet(0)]
+		[ISet,"Zplugin:KM Decimate:Keep Groups",kdSet(1)]
+		[ISet,"Zplugin:KM Decimate:Keep Original",kdSet(2)]
+		[ISet,"Zplugin:KM Decimate:Keep Polypaint",kdSet3(0)]
+		[ISet,"Zplugin:KM Decimate:Color Detail",kdSet3(1)]
+		[ISet,"Zplugin:KM Decimate:Target Polys",kdSet2(0)]
+		[ISet,"Zplugin:KM Decimate:SDiv Levels",kdSet2(1)]
+		[ISet,"Zplugin:KM Decimate:Target Faces",kdSet2(2)]
+		[ISet,"Zplugin:KM Decimate:Use History",kdSet2(3)]
+		[ISet,"Zplugin:KM Decimate:Pre Decimate",kdSet4(0)]
+	]
+	[VarSet,kdBusy,0]
 ]
 
 // ---------------------------------------------------------------- import / export preferences: no flips both ways during the round trip
@@ -587,7 +634,7 @@
 	[VarSet,kdTmp,kdGoz][RoutineCall,kdDel]
 	[VarSet,kdTmp,kdRes][RoutineCall,kdDel]
 	[VarSet,kdTmp,kdPrg][RoutineCall,kdDel]
-	[RoutineCall,kdEnableUI]
+	[RoutineCall,kdSyncUI]
 ]
 
 // ---------------------------------------------------------------- remesh: keep the current state as history -> ZRemesher -> subdivide -> project level by level
@@ -741,7 +788,7 @@
 			[IFreeze,[RoutineCall,kdDelete][SubToolSelect,kdSrc]]
 			[VarSet,kdMsg,"KM Remesh: cancelled, the model was not changed."][VarSet,kdLI,46][RoutineCall,kdText]
 			[Note,kdMsg,,3]
-			[RoutineCall,kdEnableUI]
+			[RoutineCall,kdSyncUI]
 			[Exit]
 		]
 		[If,kdPre==1,[Mesh3DGet,1,,,kdPN]]
@@ -762,7 +809,7 @@
 		[If,kdSet2(3)==0,[RoutineCall,kdDelete][SubToolSelect,kdSrc]]
 		[VarSet,kdMsg,"KM Remesh: ZRemesher is not available for this subtool."][VarSet,kdLI,22][RoutineCall,kdText]
 		[Note,kdMsg,,3]
-		[RoutineCall,kdEnableUI]
+		[RoutineCall,kdSyncUI]
 		[Exit]
 	]
 	// the ZRemesher result, to compare the topology with and without pre-decimation
@@ -877,79 +924,92 @@
 	[VarSet,kdLine,[StrMerge,kdW47,kdRT(14),kdW48,kdRT(15),kdW49]]
 	[VarSet,kdMsg,[StrMerge,kdMsg,kdNL,kdLine]]
 	[Note,kdMsg,,6]
-	[RoutineCall,kdEnableUI]
+	[RoutineCall,kdSyncUI]
 ]
 
 // ---------------------------------------------------------------- interface
 [VarSet,kdTip,"Decimate the active subtool. With Keep Original on, a copy is decimated and placed below it (name ends with _KM and the percent)"][VarSet,kdLI,0][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:Decimate",kdTip,
+	[RoutineCall,kdSyncUI]
 	[RoutineCall,kdRun]
 ,0,1,,,32]
 
 [VarSet,kdTip,"Percent of the triangles to keep (10 = one tenth)"][VarSet,kdLI,1][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Percent",kdSet(0),0.1,0.1,100,kdTip,
-	[VarSet,kdSet(0),[IGet,"Zplugin:KM Decimate:Percent"]][RoutineCall,kdSave]
+	[If,!kdBusy,[VarSet,kdSet(0),[IGet,"Zplugin:KM Decimate:Percent"]][RoutineCall,kdSave]]
 ,0,1]
 
 [VarSet,kdTip,"Keep polygroup borders in place"][VarSet,kdLI,2][RoutineCall,kdTipOf]
 [ISwitch,"Zplugin:KM Decimate:Keep Groups",kdSet(1),kdTip,
-	[VarSet,kdSet(1),1][RoutineCall,kdSave],
-	[VarSet,kdSet(1),0][RoutineCall,kdSave]
+	[If,!kdBusy,[VarSet,kdSet(1),1-kdSet(1)][RoutineCall,kdSave][RoutineCall,kdSyncUI]],
+	[If,!kdBusy,[VarSet,kdSet(1),1-kdSet(1)][RoutineCall,kdSave][RoutineCall,kdSyncUI]]
 ,0,0.5]
 
 [VarSet,kdTip,"On: decimate a copy and keep the original. Off: decimate the subtool itself (a subtool with subdivision levels is always copied)"][VarSet,kdLI,3][RoutineCall,kdTipOf]
 [ISwitch,"Zplugin:KM Decimate:Keep Original",kdSet(2),kdTip,
-	[VarSet,kdSet(2),1][RoutineCall,kdSave],
-	[VarSet,kdSet(2),0][RoutineCall,kdSave]
+	[If,!kdBusy,[VarSet,kdSet(2),1-kdSet(2)][RoutineCall,kdSave][RoutineCall,kdSyncUI]],
+	[If,!kdBusy,[VarSet,kdSet(2),1-kdSet(2)][RoutineCall,kdSave][RoutineCall,kdSyncUI]]
 ,0,0.5]
 
 [VarSet,kdTip,"On: keep more faces along polypaint edges so they stay sharp, the result keeps its colors. Off: shape only, no polypaint"][VarSet,kdLI,34][RoutineCall,kdTipOf]
 [ISwitch,"Zplugin:KM Decimate:Keep Polypaint",kdSet3(0),kdTip,
-	[VarSet,kdSet3(0),1][RoutineCall,kdSave3],
-	[VarSet,kdSet3(0),0][RoutineCall,kdSave3]
+	[If,!kdBusy,[VarSet,kdSet3(0),1-kdSet3(0)][RoutineCall,kdSave3][RoutineCall,kdSyncUI]],
+	[If,!kdBusy,[VarSet,kdSet3(0),1-kdSet3(0)][RoutineCall,kdSave3][RoutineCall,kdSyncUI]]
 ,0,0.5]
 
 [VarSet,kdTip,"With Keep Polypaint: how many faces go to polypaint edges. 1 = shape first, 10 = sharpest eyes and lines (fewer faces elsewhere)"][VarSet,kdLI,35][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Color Detail",kdSet3(1),1,1,10,kdTip,
-	[VarSet,kdSet3(1),[IGet,"Zplugin:KM Decimate:Color Detail"]][RoutineCall,kdSave3]
+	[If,!kdBusy,[VarSet,kdSet3(1),[IGet,"Zplugin:KM Decimate:Color Detail"]][RoutineCall,kdSave3]]
 ,0,0.5]
 
 [VarSet,kdTip,"Keep the current state as history, ZRemesher to the target, subdivide and project the details back level by level"][VarSet,kdLI,5][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:ZRemesh Project",kdTip,
+	[RoutineCall,kdSyncUI]
 	[RoutineCall,kdRemesh]
 ,0,1,,,32]
 
 [VarSet,kdTip,"ZRemesher target polygons in thousands (5 = 5000), like Tool:Geometry:Target Polygons Count"][VarSet,kdLI,6][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Target Polys",kdSet2(0),0.1,0.1,200,kdTip,
-	[VarSet,kdSet2(0),[IGet,"Zplugin:KM Decimate:Target Polys"]][RoutineCall,kdSave2]
+	[If,!kdBusy,[VarSet,kdSet2(0),[IGet,"Zplugin:KM Decimate:Target Polys"]][RoutineCall,kdSave2]]
 ,0,1]
 
 [VarSet,kdTip,"0 = auto (the top level comes closest to the original or to Target Faces); other values = always this many levels"][VarSet,kdLI,7][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:SDiv Levels",kdSet2(1),1,0,8,kdTip,
-	[VarSet,kdSet2(1),[IGet,"Zplugin:KM Decimate:SDiv Levels"]][RoutineCall,kdSave2]
+	[If,!kdBusy,[VarSet,kdSet2(1),[IGet,"Zplugin:KM Decimate:SDiv Levels"]][RoutineCall,kdSave2]]
 ,0,0.5]
 
 [VarSet,kdTip,"Target faces for the auto levels, in units of 10000; 0 = like the original"][VarSet,kdLI,8][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Target Faces",kdSet2(2),1,0,2000,kdTip,
-	[VarSet,kdSet2(2),[IGet,"Zplugin:KM Decimate:Target Faces"]][RoutineCall,kdSave2]
+	[If,!kdBusy,[VarSet,kdSet2(2),[IGet,"Zplugin:KM Decimate:Target Faces"]][RoutineCall,kdSave2]]
 ,0,0.5]
 
 [VarSet,kdTip,"On: ZBrush Project History (first Ctrl+click the current state on the timeline). Off: project from a temporary copy"][VarSet,kdLI,9][RoutineCall,kdTipOf]
 [ISwitch,"Zplugin:KM Decimate:Use History",kdSet2(3),kdTip,
-	[VarSet,kdSet2(3),1][RoutineCall,kdSave2],
-	[VarSet,kdSet2(3),0][RoutineCall,kdSave2]
+	[If,!kdBusy,[VarSet,kdSet2(3),1-kdSet2(3)][RoutineCall,kdSave2][RoutineCall,kdSyncUI]],
+	[If,!kdBusy,[VarSet,kdSet2(3),1-kdSet2(3)][RoutineCall,kdSave2][RoutineCall,kdSyncUI]]
 ,0,1]
 
 [VarSet,kdTip,"Before ZRemesher, decimate the copy with KM Decimate to this many x10000 triangles: much faster, the details still come from the original. 0 = off; not used with Use History"][VarSet,kdLI,36][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Pre Decimate",kdSet4(0),1,0,1000,kdTip,
-	[VarSet,kdSet4(0),[IGet,"Zplugin:KM Decimate:Pre Decimate"]][RoutineCall,kdSave4]
+	[If,!kdBusy,[VarSet,kdSet4(0),[IGet,"Zplugin:KM Decimate:Pre Decimate"]][RoutineCall,kdSave4]]
 ,0,1]
 
-[VarSet,kdTip,"KM Decimate 0.3"][VarSet,kdLI,4][RoutineCall,kdTipOf]
+[VarSet,kdTip,"KM Decimate 0.3.1"][VarSet,kdLI,4][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:About",kdTip,
-	[VarSet,kdMsg,"KM Decimate 0.3 - multi-threaded QEM decimation (keeps polypaint edges) and ZRemesh Project. Log: C:\Users\Public\KMDecimate\work\log.txt"][VarSet,kdLI,16][RoutineCall,kdText]
+	[VarSet,kdMsg,"KM Decimate 0.3.1 - multi-threaded QEM decimation (keeps polypaint edges) and ZRemesh Project. Log: C:\Users\Public\KMDecimate\work\log.txt"][VarSet,kdLI,16][RoutineCall,kdText]
 	[Note,kdMsg,,4]
-,0,1]
+	[RoutineCall,kdSyncUI]
+,0,0.5]
+
+[VarSet,kdTip,"Look on GitHub for a newer version; if there is one, the download page can be opened (needs the internet)"][VarSet,kdLI,54][RoutineCall,kdTipOf]
+[IButton,"Zplugin:KM Decimate:Check Update",kdTip,
+	[RoutineCall,kdSyncUI]
+	[RoutineCall,kdEnsureDirs]
+	[VarSave,kdUpd,kdUpdZ]
+	[VarSet,kdTmp,kdUpdZ][RoutineCall,kdLaunch]
+	[VarSet,kdMsg,"KM Decimate: checking for updates, the result comes in a message box..."][VarSet,kdLI,55][RoutineCall,kdText]
+	[Note,kdMsg,,1]
+,0,0.5]
 
 // ---------------------------------------------------------------- Chinese labels
 [RoutineDef,kdApplyLang,
@@ -966,5 +1026,12 @@
 	[VarSet,kdTmp,"Zplugin:KM Decimate:Use History"][VarSet,kdLI,9][RoutineCall,kdLabel]
 	[VarSet,kdTmp,"Zplugin:KM Decimate:Pre Decimate"][VarSet,kdLI,36][RoutineCall,kdLabel]
 	[VarSet,kdTmp,"Zplugin:KM Decimate:About"][VarSet,kdLI,4][RoutineCall,kdLabel]
+	[VarSet,kdTmp,"Zplugin:KM Decimate:Check Update"][VarSet,kdLI,54][RoutineCall,kdLabel]
 ]
 [RoutineCall,kdApplyLang]
+// the very first run (ZBrush startup) has just created the switches and sliders: nothing to enable yet, and ISet /
+// IEnable on them there makes ZBrush 2026 skip the plugin ("error in its content", seen with KM Paint)
+[If,[MemGetSize,kdRunM]==0,
+	[MemCreate,kdRunM,4,0],
+	[RoutineCall,kdSyncUI]
+]

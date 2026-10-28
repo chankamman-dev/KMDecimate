@@ -1,23 +1,23 @@
-# KM 减面 ZBrush 端中文词条。改完运行 py -3 tools/build_lang.py 生成 KMDecimate/lang_zh.bin。
+# KM减面大王 ZBrush 端中文词条。改完运行 py -3 tools/build_lang.py 生成 KMDecimate/lang_zh.bin。
 # 列：序号<Tab>按钮名(消息条目留空)<Tab>中文标签(≤21 个汉字)<Tab>中文提示/消息(≤53 个汉字)
 # 序号就是 KMDecimate.txt 里 kdLI 用的编号，不要改动已有编号。
 0	Decimate	减面	对当前子工具减面。开着“保留原物体”时先复制一份再减，结果在它下面，名字带 _KM 和百分比
 1	Percent	保留百分比	保留原来三角形数量的百分之几（10 = 减到十分之一）
 2	Keep Groups	保留组边界	尽量不让 polygroup 的边界变形
 3	Keep Original	保留原物体	开：原物体保留（重拓扑后隐藏它）；关：减面直接改当前子工具，重拓扑投射完删掉原物体
-4	About	关于	KM 减面 0.3
+4	About	关于	KM减面大王 0.3.1
 5	ZRemesh Project	重拓扑并投射	把当前状态存为历史，ZRemesher 到目标面数，自动细分，并逐级把细节投射回来
 6	Target Polys	目标多边形数	ZRemesher 的目标面数，单位千（5 = 5000），同 ZBrush 的 Target Polygons Count
 7	SDiv Levels	细分级数	0 = 自动（最高级面数最接近原模型或“目标面数”）；其他值 = 固定细分这么多级
 8	Target Faces	目标面数(万)	自动细分时要接近的总面数，单位万；0 = 接近原模型的面数
 9	Use History	用历史投射	开：用 ZBrush 的 Project History（先在时间轴上 Ctrl+点击当前状态）；关：用临时副本投射
-10			KM 减面：请先选中一个可编辑的 PolyMesh3D 子工具。
-11			KM 减面：没等到 KMDecimate.exe 的结果（日志在 C:\Users\Public\KMDecimate\work\log.txt）
-12			KM 减面：GoZ 导出失败。
+10			KM减面大王：请先选中一个可编辑的 PolyMesh3D 子工具。
+11			KM减面大王：没等到 KMDecimate.exe 的结果（日志在 C:\Users\Public\KMDecimate\work\log.txt）
+12			KM减面大王：GoZ 导出失败。
 13			导出
 14			导入
 15			全程
-16			KM 减面 0.3：多线程 QEM 减面（保留顶点色边界）+ 重拓扑并投射。日志在 C:\Users\Public\KMDecimate\work\log.txt
+16			KM减面大王 0.3.1：多线程 QEM 减面（保留顶点色边界）+ 重拓扑并投射。日志在 C:\Users\Public\KMDecimate\work\log.txt
 17			KM 重拓扑：ZRemesher 后
 18			 面，细分
 19			 级，最高级
@@ -25,16 +25,16 @@
 21			 面），用时
 22			KM 重拓扑：这个子工具不能用 ZRemesher。
 23			原物体是文件夹的第一个子工具，删掉它可能连文件夹一起删，所以保留了（已隐藏）。
-24			KM 减面：读取模型…
-25			KM 减面：准备中…
-26			KM 减面：正在减面
-27			KM 减面：写出结果…
+24			KM减面大王：读取模型…
+25			KM减面大王：准备中…
+26			KM减面大王：正在减面
+27			KM减面大王：写出结果…
 28			    按 Esc 取消
-29			KM 减面：导出中（ZBrush 正在处理，这一步不能取消）…
-30			KM 减面：导入中（ZBrush 正在处理）…
+29			KM减面大王：导出中（ZBrush 正在处理，这一步不能取消）…
+30			KM减面大王：导入中（ZBrush 正在处理）…
 31			KM 重拓扑：ZRemesher 计算中…
 32			KM 重拓扑：细分并投射
-33			KM 减面：已取消，模型没有改动。
+33			KM减面大王：已取消，模型没有改动。
 34	Keep Polypaint	保留顶点色	开：颜色边界附近多留面、保持清晰，结果带 Polypaint；关：只按形状减，结果不带颜色
 35	Color Detail	颜色细节	保留顶点色时把多少面让给颜色边界：1 形状优先，10 眼睛、描线最清楚（别处面更少）
 36	Pre Decimate	预减面(万)	ZRemesher 前先把副本减到这么多万个三角形，快很多，细节仍从原模型投射；0 = 不预减面，用历史投射时不生效
@@ -55,3 +55,5 @@
 51			 秒，减面 
 52			 秒，导入 
 53			 秒）
+54	Check Update	检查更新	去 GitHub 查有没有新版本，有的话可以打开下载页（需要联网）
+55			KM减面大王：正在检查更新，结果会弹窗显示…

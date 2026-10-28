@@ -1,4 +1,4 @@
-# KMDecimate（KM 减面）原型
+# KMDecimate（KM减面大王）原型
 
 目标：比 ZBrush 自带的减面大师（Decimation Master）更快的减面工具。现阶段只是一个命令行原型，用来和减面大师比速度和质量，还没有接进 ZBrush。
 
@@ -122,7 +122,7 @@ ZBrush 端：每次减面的导出 / 计算 / 导入（第一次、第二次）/
 
 还不支持：UV 不保留（OBJ 里的 vt 被忽略）；polygroup 边界默认不保护（`--groups 10` 可以打开）；遮罩不保留。
 
-## ZBrush 插件（0.3）
+## ZBrush 插件（0.3.1）
 
 面板：Zplugin > KM Decimate（按钮显示中文）。
 - **减面**：默认先复制当前子工具，再在副本上删掉低细分级、减面，结果放在原物体下面，名字是 `原名_KM百分比`。弹窗显示导出、计算、导入各用了几秒。
@@ -142,6 +142,14 @@ ZBrush 端：每次减面的导出 / 计算 / 导入（第一次、第二次）/
 - 流程：ZScript 导出 GoZ 到 `C:\Users\Public\KMDecimate\work\in.GoZ` → `KMDecimate.exe job.zvr` → 写 `out.GoZ` + `status.txt` + `note.txt` → ZScript 导入。日志 `work\log.txt`。
 - 任务交接（0.3.1）：插件用 **VarSave** 把 [格式号 2, 百分比, 保留组, 线程数, 顶点色, job.txt 的写入返回值, 编号] 存成 `work\job.zvr`（zvr 格式：`e9 03 00 00`、元素个数 u32、每个元素 `'F'` + float32），exe 读它，输入输出固定是同目录的 in.GoZ / out.GoZ。原因：用户的一个 ZBrush 2026 会话里 MemSaveToFile 写不进去（job.txt 停在旧内容，exe 拿旧设置减面，开了顶点色也被当成关），VarSave 一直正常。job.txt 照写（给旧 exe），MemSaveToFile 的返回值记进 job.zvr，日志里是 `job=zvr jobtxt=…`；zvr 读不了才退回同目录的 job.txt。插件每次开始先删掉旧的 job.txt 和 job.zvr，读不到任务就报错，不会再悄悄用上一次的任务。
 - 组装与安装：先 `build.ps1`，再 `py -3 tools/package.py --install`（默认装到 `F:\Zbrush Assest\ZStartup\ZPlugs64` 和 `F:\art software\zbrush 2024.0.4\ZStartup\ZPlugs64`）。改 ZScript 后 package.py 会先跑 `tools/zscript_lint.py`。
+- 给别人用的安装包：`py -3 tools/package.py --zip [另存目录]` → `dist\KMDecimate_<版本>_<日期>.zip`。里面有 安装.bat / 卸载.bat / install.ps1 / 使用说明.txt（源文件在 `src\installer\`，`{{VER}}` 换成 KMDecimate.txt 第一行的版本号）。安装器会自动找 ZBrush 2024 安装目录和 2026 资源目录，装之前先备份旧版。第一次安装时放一个时间设成 2020 年的占位 `KMDecimate.zsc`，这样 ZBrush 启动时会自动编译。ZFileUtils64.dll 依次找环境变量 `KM_ZFU`、`ZFU`、同级的 KMPaint 仓库。
+- `build.ps1` 用 `-march=x86-64-v2 -mtune=generic`，不用 `-march=native`：本机版有上千条 AVX2 指令，在不支持 AVX2 的 CPU 上会崩溃。在 i7-13700KF 上测过，两者一样快（253 万面减到 10%，减面都是 0.81 秒）。
+- **ZBrush 2026 开关变灰**：2026 每按一次插件里的按钮，都会把整个脚本重跑一遍，重新定义开关时会把开关禁用，并重置成定义里的初始值，所以开关点一次就灰掉了。修法和 KM Link、KM Paint 一样：
+  - 滑条在定义之前先用 IGet 读回当前值；
+  - 开关的两个命令都是“取反”，不看开关自己的状态；
+  - `kdSyncUI` 重新启用所有控件，并按设置 ISet；它在脚本末尾调用，但第一次执行（ZBrush 启动）时跳过，用内存块 `kdRunM` 做标记；也在按钮命令里调用；
+  - `kdBusy` 防止 ISet 触发开关命令。
+- **检查更新**：面板上的“检查更新”用 VarSave 存 `work\update.zvr`（格式号 1、版本三位，见 KMDecimate.txt 里的 `kdUpd`，package.py 会检查它和第一行一致），再用它启动 KMDecimate.exe。exe（`src\update.h`，WinHTTP）读 `api.github.com/repos/chankamman-dev/KMDecimate/releases/latest` 的 `tag_name`，比较版本后弹窗；有新版本时可以打开 Release 页面。结果另写一行 `work\update.txt`。**需要仓库公开并发布 Release**：私有仓库对没登录的人返回 404，弹窗会说“还没有发布的版本，或者仓库不是公开的”。测试用 `KMDEC_UPDATE_REPO=owner/name` 换仓库，`KMDEC_TEST_NOBOX=1` 不弹窗。
 - 第一次需要在 ZBrush 里 ZScript > Load 选 `ZPlugs64\KMDecimate.txt`，之后 ZBrush 启动会自动编译。
 
 ### 重拓扑：预减面和分步计时（0.3.1）
