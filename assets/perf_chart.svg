@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 310" width="100%">
+  <defs>
+    <linearGradient id="cbg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#172033" />
+    </linearGradient>
+    <linearGradient id="barFast" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff6b35" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+    <linearGradient id="barMem" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1000" height="310" rx="16" fill="url(#cbg)" stroke="#334155" stroke-width="1.5" />
+
+  <!-- Left Panel: 34M Character Decimation Time (s) -->
+  <text x="36" y="42" fill="#f8fafc" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">3401 万面带顶点色角色 → 5% 核心总耗时（越短越快）</text>
+
+  <text x="36" y="88" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">0.1 初版分块</text>
+  <rect x="165" y="72" width="280" height="22" rx="4" fill="#475569" />
+  <text x="453" y="88" fill="#cbd5e1" font-family="Segoe UI, sans-serif" font-size="13" font-weight="600">31.1 s</text>
+
+  <text x="36" y="136" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">0.3 缓存块+4叉堆</text>
+  <rect x="165" y="120" width="101" height="22" rx="4" fill="#64748b" />
+  <text x="274" y="136" fill="#cbd5e1" font-family="Segoe UI, sans-serif" font-size="13" font-weight="600">11.2 s</text>
+
+  <text x="36" y="184" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">0.3.1 阈值过滤</text>
+  <rect x="165" y="168" width="70" height="22" rx="4" fill="#94a3b8" />
+  <text x="243" y="184" fill="#e2e8f0" font-family="Segoe UI, sans-serif" font-size="13" font-weight="600">7.79 s</text>
+
+  <text x="36" y="232" fill="#fdba74" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13.5" font-weight="700">0.4.0 (当前版本)</text>
+  <rect x="165" y="216" width="46" height="22" rx="4" fill="url(#barFast)" />
+  <text x="219" y="232" fill="#fb923c" font-family="Segoe UI, sans-serif" font-size="14.5" font-weight="800">5.10 s  (667 万面/秒，提速 6.1×)</text>
+
+  <text x="36" y="276" fill="#64748b" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">测试环境：i7-13700KF (24 线程)，real34m.GoZ (含读取 0.32s + 减面 4.76s + 写出 0.02s)</text>
+
+  <!-- Vertical Divider -->
+  <line x1="525" y1="28" x2="525" y2="282" stroke="#334155" stroke-width="1.5" />
+
+  <!-- Right Panel: Peak Commit Memory -->
+  <text x="556" y="42" fill="#f8fafc" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">峰值提交内存对比（524 万面带顶点色 GoZ，越低越省）</text>
+
+  <text x="556" y="102" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">0.3.1 原始基线</text>
+  <rect x="688" y="86" width="220" height="24" rx="4" fill="#475569" />
+  <text x="916" y="103" fill="#cbd5e1" font-family="Segoe UI, sans-serif" font-size="13" font-weight="600">1,881 MiB</text>
+
+  <text x="556" y="162" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">线程局部 rk + 释放 g</text>
+  <rect x="688" y="146" width="127" height="24" rx="4" fill="#64748b" />
+  <text x="823" y="163" fill="#e2e8f0" font-family="Segoe UI, sans-serif" font-size="13" font-weight="600">1,089 MiB (-42%)</text>
+
+  <text x="556" y="222" fill="#7dd3fc" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13.5" font-weight="700">0.4.0 (40B QuadricF)</text>
+  <rect x="688" y="206" width="112" height="24" rx="4" fill="url(#barMem)" />
+  <text x="808" y="223" fill="#38bdf8" font-family="Segoe UI, sans-serif" font-size="14.5" font-weight="800">961 MiB (-48.9%)</text>
+
+  <text x="556" y="276" fill="#64748b" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">3401 万面大模型峰值内存同步从 &gt;11 GiB 降至 ~6.5 GiB，32 GB 机器不再换页卡顿</text>
+</svg>

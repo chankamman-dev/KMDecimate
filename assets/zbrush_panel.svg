@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="100%">
+  <defs>
+    <linearGradient id="pbg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="zbBtn" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#52525b" />
+      <stop offset="100%" stop-color="#3f3f46" />
+    </linearGradient>
+    <linearGradient id="zbOn" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff7b47" />
+      <stop offset="100%" stop-color="#e0531c" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1000" height="500" rx="16" fill="url(#pbg)" stroke="#334155" stroke-width="1.5" />
+
+  <rect x="330" y="24" width="340" height="452" rx="8" fill="#27272a" stroke="#52525b" stroke-width="2" />
+  <rect x="330" y="24" width="340" height="30" rx="8" fill="#18181b" />
+  <circle cx="348" cy="39" r="5" fill="#ff6b35" />
+  <text x="362" y="44" fill="#f4f4f5" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13.5" font-weight="700">Zplugin  ▸  KM Decimate 0.4.0</text>
+
+  <rect x="344" y="64" width="312" height="38" rx="5" fill="url(#zbOn)" stroke="#fdba74" stroke-width="1" />
+  <text x="500" y="88" fill="#ffffff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="16" font-weight="700" text-anchor="middle">减 面</text>
+
+  <rect x="344" y="108" width="153" height="28" rx="4" fill="url(#zbBtn)" stroke="#71717a" stroke-width="1" />
+  <text x="420" y="127" fill="#f4f4f5" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13" font-weight="600" text-anchor="middle">批量减面(可见)</text>
+  <rect x="503" y="108" width="153" height="28" rx="4" fill="url(#zbBtn)" stroke="#71717a" stroke-width="1" />
+  <text x="579" y="127" fill="#f4f4f5" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13" font-weight="600" text-anchor="middle">批量减面(全部)</text>
+
+  <rect x="344" y="142" width="312" height="26" rx="4" fill="#18181b" stroke="#52525b" stroke-width="1" />
+  <rect x="345" y="143" width="75" height="24" rx="3" fill="#ff6b35" opacity="0.45" />
+  <text x="354" y="160" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5">保留百分比</text>
+  <text x="644" y="160" fill="#fb923c" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" text-anchor="end">10</text>
+
+  <rect x="344" y="174" width="153" height="26" rx="4" fill="url(#zbOn)" />
+  <text x="420" y="192" fill="#ffffff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5" font-weight="600" text-anchor="middle">保留组边界</text>
+  <rect x="503" y="174" width="153" height="26" rx="4" fill="url(#zbOn)" />
+  <text x="579" y="192" fill="#ffffff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5" font-weight="600" text-anchor="middle">保留原物体</text>
+
+  <rect x="344" y="206" width="153" height="26" rx="4" fill="url(#zbOn)" />
+  <text x="420" y="224" fill="#ffffff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5" font-weight="600" text-anchor="middle">保留顶点色</text>
+  <rect x="503" y="206" width="153" height="26" rx="4" fill="#18181b" stroke="#52525b" stroke-width="1" />
+  <rect x="504" y="207" width="120" height="24" rx="3" fill="#ff6b35" opacity="0.45" />
+  <text x="512" y="224" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">颜色细节</text>
+  <text x="646" y="224" fill="#fb923c" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" text-anchor="end">8</text>
+
+  <rect x="344" y="238" width="153" height="26" rx="4" fill="url(#zbOn)" />
+  <text x="420" y="256" fill="#ffffff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5" font-weight="600" text-anchor="middle">保留遮罩</text>
+  <rect x="503" y="238" width="153" height="26" rx="4" fill="url(#zbBtn)" stroke="#71717a" stroke-width="1" />
+  <text x="579" y="256" fill="#d4d4d8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5" font-weight="600" text-anchor="middle">保留 UV</text>
+
+  <rect x="344" y="278" width="312" height="38" rx="5" fill="#0284c7" stroke="#7dd3fc" stroke-width="1" />
+  <text x="500" y="302" fill="#ffffff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="15.5" font-weight="700" text-anchor="middle">重拓扑并投射</text>
+
+  <rect x="344" y="322" width="312" height="26" rx="4" fill="#18181b" stroke="#52525b" stroke-width="1" />
+  <rect x="345" y="323" width="50" height="24" rx="3" fill="#38bdf8" opacity="0.35" />
+  <text x="354" y="340" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12.5">目标多边形数 (千)</text>
+  <text x="644" y="340" fill="#38bdf8" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" text-anchor="end">5</text>
+
+  <rect x="344" y="354" width="153" height="26" rx="4" fill="#18181b" stroke="#52525b" stroke-width="1" />
+  <text x="354" y="372" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">细分级数</text>
+  <text x="488" y="372" fill="#38bdf8" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" text-anchor="end">0</text>
+  <rect x="503" y="354" width="153" height="26" rx="4" fill="#18181b" stroke="#52525b" stroke-width="1" />
+  <text x="512" y="372" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">目标面数(万)</text>
+  <text x="646" y="372" fill="#38bdf8" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" text-anchor="end">0</text>
+
+  <rect x="344" y="386" width="312" height="24" rx="4" fill="url(#zbBtn)" stroke="#71717a" stroke-width="1" />
+  <text x="500" y="403" fill="#d4d4d8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12" font-weight="600" text-anchor="middle">用历史投射</text>
+  <rect x="344" y="416" width="312" height="24" rx="4" fill="#18181b" stroke="#52525b" stroke-width="1" />
+  <rect x="345" y="417" width="95" height="22" rx="3" fill="#38bdf8" opacity="0.35" />
+  <text x="354" y="433" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">预减面(万)</text>
+  <text x="644" y="433" fill="#38bdf8" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="700" text-anchor="end">100</text>
+
+  <rect x="344" y="446" width="153" height="22" rx="4" fill="url(#zbBtn)" />
+  <text x="420" y="461" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="11.5" text-anchor="middle">关于</text>
+  <rect x="503" y="446" width="153" height="22" rx="4" fill="url(#zbBtn)" />
+  <text x="579" y="461" fill="#e4e4e7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="11.5" text-anchor="middle">检查更新</text>
+
+  <rect x="28" y="60" width="265" height="82" rx="10" fill="#1e293b" stroke="#fb923c" stroke-width="1.2" />
+  <text x="44" y="85" fill="#fdba74" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">① 单子工具 &amp; 批量减面</text>
+  <text x="44" y="108" fill="#cbd5e1" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">支持当前 / 可见 / 全部子工具一键减面；</text>
+  <text x="44" y="128" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">实时进度条，按 Esc 0.2s 内安全取消回滚</text>
+  <line x1="293" y1="102" x2="342" y2="102" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="4,3" />
+
+  <rect x="28" y="180" width="265" height="92" rx="10" fill="#1e293b" stroke="#a855f7" stroke-width="1.2" />
+  <text x="44" y="205" fill="#e9d5ff" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">② 顶点色 · 遮罩 · UV · 组保护</text>
+  <text x="44" y="228" fill="#cbd5e1" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">1–10 级颜色细节滑条保住瞳孔高光与描线；</text>
+  <text x="44" y="248" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">Mask16 遮罩区高密度保护；UV 接缝防翻转</text>
+  <line x1="293" y1="226" x2="342" y2="226" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="4,3" />
+
+  <rect x="707" y="150" width="265" height="82" rx="10" fill="#1e293b" stroke="#22c55e" stroke-width="1.2" />
+  <text x="723" y="175" fill="#bbf7d0" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">③ 原地替换 vs 保留副本</text>
+  <text x="723" y="198" fill="#cbd5e1" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">开启时自动复制为 原名_KM百分比；</text>
+  <text x="723" y="218" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">关闭时直接原地替换（带细分级也安全）</text>
+  <line x1="658" y1="187" x2="707" y2="187" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,3" />
+
+  <rect x="707" y="280" width="265" height="105" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2" />
+  <text x="723" y="305" fill="#7dd3fc" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">④ 预减面加速 ZRemesher 投射</text>
+  <text x="723" y="328" fill="#cbd5e1" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">千万面高模先用 KM 快速预减到 100 万面</text>
+  <text x="723" y="348" fill="#cbd5e1" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">再喂给 ZRemesher，随后自动细分并从</text>
+  <text x="723" y="368" fill="#94a3b8" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">原高模逐级投射细节，速度与细节兼得</text>
+  <line x1="658" y1="320" x2="707" y2="320" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4,3" />
+</svg>

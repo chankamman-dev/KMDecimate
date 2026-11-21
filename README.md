@@ -1,8 +1,8 @@
 <div align="center">
 
-# KMDecimate · KM减面大王
+<img src="assets/hero_banner.svg" width="100%" alt="KMDecimate · KM减面大王 Hero Banner" />
 
-**面向 ZBrush 2024 / 2026 的极速多线程二次误差（QEM）减面与一键重拓扑投射插件**
+<br/>
 
 [![Latest Release](https://img.shields.io/github/v/release/chankamman-dev/KMDecimate?style=flat-square&logo=github&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=2ea44f)](https://github.com/chankamman-dev/KMDecimate/releases/latest)
 [![ZBrush](https://img.shields.io/badge/ZBrush-2024%20%7C%202026-ff6b35?style=flat-square)](https://github.com/chankamman-dev/KMDecimate/releases/latest)
@@ -10,9 +10,29 @@
 [![ISA](https://img.shields.io/badge/CPU-x86--64--v2%20(2009%2B)-6f42c1?style=flat-square)](#%E4%BB%8E%E6%BA%90%E7%A0%81%E6%9E%84%E5%BB%BA%E4%B8%8E%E6%B5%8B%E8%AF%95)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20%20%7C%20Zero%20Deps-00599C?style=flat-square&logo=cplusplus)](#%E7%AE%97%E6%B3%95%E4%B8%8E%E6%9E%B6%E6%9E%84)
 
-[**下载安装包 (Releases)**](https://github.com/chankamman-dev/KMDecimate/releases/latest) · [**核心特性**](#%E6%A0%B8%E5%BF%83%E7%89%B9%E6%80%A7) · [**性能与质量实测**](#%E6%80%A7%E8%83%BD%E4%B8%8E%E8%B4%A8%E9%87%8F%E5%AE%9E%E6%B5%8B) · [**安装与使用指南**](#%E5%AE%89%E8%A3%85%E4%B8%8E%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97) · [**算法与架构**](#%E7%AE%97%E6%B3%95%E4%B8%8E%E6%9E%B6%E6%9E%84) · [**命令行与开发工具**](#%E5%91%BD%E4%BB%A4%E8%A1%8C%E4%B8%8E%E5%BC%80%E5%8F%91%E5%B7%A5%E5%85%B7)
+[**下载安装包 (Releases)**](https://github.com/chankamman-dev/KMDecimate/releases/latest) · [**视觉效果对比**](#%E8%A7%86%E8%A7%89%E6%95%88%E6%9E%9C%E5%AF%B9%E6%AF%94) · [**核心特性**](#%E6%A0%B8%E5%BF%83%E7%89%B9%E6%80%A7) · [**安装与界面预览**](#%E5%AE%89%E8%A3%85%E4%B8%8E%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97) · [**性能与质量实测**](#%E6%80%A7%E8%83%BD%E4%B8%8E%E8%B4%A8%E9%87%8F%E5%AE%9E%E6%B5%8B) · [**算法与架构**](#%E7%AE%97%E6%B3%95%E4%B8%8E%E6%9E%84%E6%9E%B6)
 
 </div>
+
+---
+
+## 视觉效果对比
+
+### 1. 真实 3401 万面角色减至 5%（170 万面）眼部 Polypaint 对比
+
+<p align="center">
+  <img src="assets/real_eye_5pct.png" width="100%" alt="3401万面真实角色减至5%眼部顶点色对比（原高模 / 颜色细节 1 / 5 / 8 / 10）" />
+</p>
+
+> **从左到右**：**原高模（3401 万面）** → **颜色细节 1** → **颜色细节 5** → **颜色细节 8（默认）** → **颜色细节 10**（均为保留 **5% = 170 万面**）。在默认档位 `8` 与 `10` 下，虹膜刻度、绿色高光、睫毛尖与眼白边界清晰锐利，视觉上与 3401 万面原高模几乎无差别。
+
+### 2. 颜色边界自适应布线密度对比（300 万面减至 5% 线框叠加）
+
+<p align="center">
+  <img src="assets/eye_5pct_wire.png" width="100%" alt="300万面减至5%线框分布对比（原模型 / 不管颜色 / 细节 1 / 5 / 10）" />
+</p>
+
+> **从左到右**：**原模型** → **不管颜色**（平摊三角形，黑白描边断成大锯齿） → **颜色细节 1** → **颜色细节 5** → **颜色细节 10**（平坦单色皮肤自动用大三角形省面，省下的面自动向瞳孔、黑色睫毛环与红线边界高密度聚集，并沿跨色边界切向对齐）。
 
 ---
 
@@ -44,7 +64,11 @@
 
 ---
 
-### 2. ZBrush 面板功能速查
+### 2. ZBrush 面板界面预览与功能速查
+
+<p align="center">
+  <img src="assets/zbrush_panel.svg" width="100%" alt="ZBrush Zplugin > KM Decimate 0.4.0 面板界面预览" />
+</p>
 
 #### 减面区（Decimate）
 
@@ -73,6 +97,10 @@
 ---
 
 ## 性能与质量实测
+
+<p align="center">
+  <img src="assets/perf_chart.svg" width="100%" alt="3401万面耗时演进与峰值提交内存对比图表" />
+</p>
 
 ### 1. 真实 3401 万面角色模型端到端耗时与内存演进
 
