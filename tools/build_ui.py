@@ -37,17 +37,17 @@ class SIZE(ctypes.Structure):
 
 
 def render_text_mask(text: str, font_px: int, weight: int = 700, font_name: str = "Microsoft YaHei UI") -> tuple[int, int, bytes]:
-    """Render UTF-16 text using Win32 GDI at high resolution and return (w, h, grayscale_alpha_bytes)."""
+    """Render UTF-16 text at 1:1 native pixel resolution using Win32 GDI grayscale anti-aliasing."""
     hdc = gdi32.CreateCompatibleDC(0)
-    # Create font (negative height = character height, ANTIALIASED_QUALITY = 4)
+    # ANTIALIASED_QUALITY = 4 (pure 8-bit grayscale font smoothing with true TrueType hinting)
     hfont = gdi32.CreateFontW(
         -font_px, 0, 0, 0, weight, 0, 0, 0, 1, 0, 0, 4, 0, font_name
     )
     old_font = gdi32.SelectObject(hdc, hfont)
     sz = SIZE()
     gdi32.GetTextExtentPoint32W(hdc, text, len(text), ctypes.byref(sz))
-    tw = max(1, sz.cx + font_px // 2)
-    th = max(1, sz.cy + font_px // 4)
+    tw = max(1, sz.cx + 16)
+    th = max(1, sz.cy + 12)
 
     bmi = BITMAPINFOHEADER()
     bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
@@ -61,14 +61,11 @@ def render_text_mask(text: str, font_px: int, weight: int = 700, font_name: str 
     hbmp = gdi32.CreateDIBSection(hdc, ctypes.byref(bmi), 0, ctypes.byref(pv), 0, 0)
     old_bmp = gdi32.SelectObject(hdc, hbmp)
 
-    # Clear to black, draw white text
     ctypes.memset(pv, 0, tw * th * 4)
     gdi32.SetBkMode(hdc, 2)  # OPAQUE
     gdi32.SetBkColor(hdc, 0x000000)
     gdi32.SetTextColor(hdc, 0xFFFFFF)
-    pad_x = font_px // 4
-    pad_y = font_px // 8
-    gdi32.TextOutW(hdc, pad_x, pad_y, text, len(text))
+    gdi32.TextOutW(hdc, 8, 6, text, len(text))
 
     raw = ctypes.string_at(pv, tw * th * 4)
     gdi32.SelectObject(hdc, old_bmp)
@@ -77,7 +74,6 @@ def render_text_mask(text: str, font_px: int, weight: int = 700, font_name: str 
     gdi32.DeleteObject(hfont)
     gdi32.DeleteDC(hdc)
 
-    # Extract tight horizontal bounding box and luminance
     alpha = bytearray(tw * th)
     min_x, max_x = tw, 0
     min_y, max_y = th, 0
@@ -85,7 +81,6 @@ def render_text_mask(text: str, font_px: int, weight: int = 700, font_name: str 
         row_off = y * tw * 4
         for x in range(tw):
             off = row_off + x * 4
-            # Average R,G,B in case ClearType was used
             lum = (raw[off] + raw[off + 1] + raw[off + 2]) // 3
             if lum > 0:
                 alpha[y * tw + x] = lum
@@ -170,31 +165,8 @@ def make_button_rgb(
     radius: float = 5.0,
     icon_kind: str = "",
 ) -> tuple[bytes, bytes, bytes]:
-    """Render an anti-aliased button (w x h) and return (R_plane, G_plane, B_plane)."""
-    # Render text at 4x resolution and downsample to 1x for razor-sharp anti-aliasing
-    ss = 4
-    tw4, th4, mask4 = render_text_mask(text, font_px * ss, weight=700)
-    tw = (tw4 + ss - 1) // ss
-    th = (th4 + ss - 1) // ss
-    tmask = bytearray(tw * th)
-    for y in range(th):
-        for x in range(tw):
-            acc = 0
-            cnt = 0
-            for dy in range(ss):
-                yy = y * ss + dy
-                if yy >= th4:
-                    continue
-                for dx in range(ss):
-                    xx = x * ss + dx
-                    if xx >= tw4:
-                        continue
-                    acc += mask4[yy * tw4 + xx]
-                    cnt += 1
-            # Slight gamma boost so white/light text on dark or orange backgrounds looks crisp and bold
-            val = (acc / max(1, cnt)) / 255.0
-            val = min(1.0, (val ** 0.78) * 1.08)
-            tmask[y * tw + x] = int(val * 255.0 + 0.5)
+    """Render an anti-aliased button (w x h) at exact 1:1 ZBrush screen pixels and return (R_plane, G_plane, B_plane)."""
+    tw, th, tmask = render_text_mask(text, font_px, weight=700)
 
     icon_rad = max(6.5, h * 0.21)
     icon_gap = int(h * 0.25) if icon_kind else 0
@@ -373,92 +345,92 @@ def save_png(path: pathlib.Path, w: int, h: int, planes: tuple[bytes, bytes, byt
 
 def build_all(out_dir: pathlib.Path = UI_DIR, preview_dir: pathlib.Path | None = None) -> list[pathlib.Path]:
     specs = [
-        # Primary Decimate button: 280x48 native screen pixel resolution (matches 160x32 aspect ratio)
+        # Primary Decimate button: 274x54 exact 1:1 ZBrush screen pixels (Height=38 in ZScript)
         dict(
             name="btn_decimate.psd",
-            w=280,
-            h=48,
+            w=274,
+            h=54,
             text="减  面",
-            top_rgb=(249, 132, 36),
+            top_rgb=(250, 134, 38),
             bot_rgb=(220, 88, 12),
-            border_rgb=(255, 174, 96),
-            hi_rgb=(255, 220, 180),
+            border_rgb=(255, 176, 98),
+            hi_rgb=(255, 222, 185),
             text_rgb=(255, 255, 255),
-            font_px=21,
-            radius=6.0,
+            font_px=25,
+            radius=5.5,
             icon_kind="mesh",
         ),
-        # Secondary ZRemesh Project button: 280x48 vibrant cyan/blue matching GitHub SVG
+        # Secondary ZRemesh Project button: 274x54 exact 1:1 ZBrush screen pixels (Height=38 in ZScript)
         dict(
             name="btn_zremesh.psd",
-            w=280,
-            h=48,
+            w=274,
+            h=54,
             text="重拓扑并投射",
-            top_rgb=(22, 148, 232),
+            top_rgb=(24, 150, 236),
             bot_rgb=(2, 108, 188),
-            border_rgb=(86, 190, 252),
-            hi_rgb=(180, 230, 255),
+            border_rgb=(88, 192, 254),
+            hi_rgb=(182, 232, 255),
             text_rgb=(255, 255, 255),
-            font_px=20,
-            radius=6.0,
+            font_px=23,
+            radius=5.5,
             icon_kind="remesh",
         ),
-        # Half-width batch buttons: 138x26 native screen pixel resolution for razor-sharp CJK text
+        # Half-width batch buttons: 134x34 exact 1:1 ZBrush screen pixels (Height=26 in ZScript)
         dict(
             name="btn_batch_vis.psd",
-            w=138,
-            h=26,
+            w=134,
+            h=34,
             text="批量减面(可见)",
-            top_rgb=(78, 82, 90),
-            bot_rgb=(54, 57, 64),
-            border_rgb=(118, 124, 136),
-            hi_rgb=(170, 176, 188),
-            text_rgb=(245, 247, 250),
-            font_px=13,
-            radius=4.0,
+            top_rgb=(82, 86, 95),
+            bot_rgb=(56, 59, 66),
+            border_rgb=(124, 130, 142),
+            hi_rgb=(175, 182, 195),
+            text_rgb=(248, 250, 252),
+            font_px=15,
+            radius=4.5,
             icon_kind="",
         ),
         dict(
             name="btn_batch_all.psd",
-            w=138,
-            h=26,
+            w=134,
+            h=34,
             text="批量减面(全部)",
-            top_rgb=(78, 82, 90),
-            bot_rgb=(54, 57, 64),
-            border_rgb=(118, 124, 136),
-            hi_rgb=(170, 176, 188),
-            text_rgb=(245, 247, 250),
-            font_px=13,
-            radius=4.0,
+            top_rgb=(82, 86, 95),
+            bot_rgb=(56, 59, 66),
+            border_rgb=(124, 130, 142),
+            hi_rgb=(175, 182, 195),
+            text_rgb=(248, 250, 252),
+            font_px=15,
+            radius=4.5,
             icon_kind="",
         ),
-        # Footer buttons: 138x24
+        # Footer buttons: 134x34 exact 1:1 ZBrush screen pixels (Height=26 in ZScript)
         dict(
             name="btn_about.psd",
-            w=138,
-            h=24,
+            w=134,
+            h=34,
             text="关  于",
-            top_rgb=(66, 69, 76),
-            bot_rgb=(48, 50, 56),
-            border_rgb=(98, 102, 112),
-            hi_rgb=(145, 150, 160),
-            text_rgb=(225, 229, 236),
-            font_px=13,
-            radius=4.0,
+            top_rgb=(70, 74, 82),
+            bot_rgb=(50, 53, 60),
+            border_rgb=(105, 110, 122),
+            hi_rgb=(150, 156, 168),
+            text_rgb=(236, 240, 246),
+            font_px=15,
+            radius=4.5,
             icon_kind="",
         ),
         dict(
             name="btn_update.psd",
-            w=138,
-            h=24,
+            w=134,
+            h=34,
             text="检查更新",
-            top_rgb=(66, 69, 76),
-            bot_rgb=(48, 50, 56),
-            border_rgb=(98, 102, 112),
-            hi_rgb=(145, 150, 160),
-            text_rgb=(225, 229, 236),
-            font_px=13,
-            radius=4.0,
+            top_rgb=(70, 74, 82),
+            bot_rgb=(50, 53, 60),
+            border_rgb=(105, 110, 122),
+            hi_rgb=(150, 156, 168),
+            text_rgb=(236, 240, 246),
+            font_px=15,
+            radius=4.5,
             icon_kind="",
         ),
     ]

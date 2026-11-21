@@ -1075,21 +1075,21 @@
 [IButton,"Zplugin:KM Decimate:Decimate",kdTip,
 	[RoutineCall,kdSyncUI]
 	[RoutineCall,kdRun]
-,0,1,,"KMDecimate\btn_decimate.psd",32]
+,0,1,,"KMDecimate\btn_decimate.psd",38]
 
 [VarSet,kdTip,"Decimate every visible subtool one by one using the current settings; Esc stops the remaining subtools"][VarSet,kdLI,58][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:Decimate Visible",kdTip,
 	[RoutineCall,kdSyncUI]
 	[VarSet,kdBAll,0]
 	[RoutineCall,kdRunBatch]
-,0,0.5,,"KMDecimate\btn_batch_vis.psd",20]
+,0,0.5,,"KMDecimate\btn_batch_vis.psd",26]
 
 [VarSet,kdTip,"Decimate every subtool one by one using the current settings; Esc stops the remaining subtools"][VarSet,kdLI,59][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:Decimate All",kdTip,
 	[RoutineCall,kdSyncUI]
 	[VarSet,kdBAll,1]
 	[RoutineCall,kdRunBatch]
-,0,0.5,,"KMDecimate\btn_batch_all.psd",20]
+,0,0.5,,"KMDecimate\btn_batch_all.psd",26]
 
 [VarSet,kdTip,"Percent of the triangles to keep (10 = one tenth)"][VarSet,kdLI,1][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Percent",kdSet(0),0.1,0.1,100,kdTip,
@@ -1135,7 +1135,7 @@
 [IButton,"Zplugin:KM Decimate:ZRemesh Project",kdTip,
 	[RoutineCall,kdSyncUI]
 	[RoutineCall,kdRemesh]
-,0,1,,"KMDecimate\btn_zremesh.psd",32]
+,0,1,,"KMDecimate\btn_zremesh.psd",38]
 
 [VarSet,kdTip,"ZRemesher target polygons in thousands (5 = 5000), like Tool:Geometry:Target Polygons Count"][VarSet,kdLI,6][RoutineCall,kdTipOf]
 [ISlider,"Zplugin:KM Decimate:Target Polys",kdSet2(0),0.1,0.1,200,kdTip,
@@ -1168,7 +1168,7 @@
 	[VarSet,kdMsg,"KM Decimate 0.4.0 - multi-threaded QEM decimation (polypaint, mask, UVs, batch) and ZRemesh Project. Log: C:\Users\Public\KMDecimate\work\log.txt"][VarSet,kdLI,16][RoutineCall,kdText]
 	[Note,kdMsg,,4]
 	[RoutineCall,kdSyncUI]
-,0,0.5,,"KMDecimate\btn_about.psd",20]
+,0,0.5,,"KMDecimate\btn_about.psd",26]
 
 [VarSet,kdTip,"Look on GitHub for a newer version; if there is one, the download page can be opened (needs the internet)"][VarSet,kdLI,54][RoutineCall,kdTipOf]
 [IButton,"Zplugin:KM Decimate:Check Update",kdTip,
@@ -1178,7 +1178,7 @@
 	[VarSet,kdTmp,kdUpdZ][RoutineCall,kdLaunch]
 	[VarSet,kdMsg,"KM Decimate: checking for updates, the result comes in a message box..."][VarSet,kdLI,55][RoutineCall,kdText]
 	[Note,kdMsg,,1]
-,0,0.5,,"KMDecimate\btn_update.psd",20]
+,0,0.5,,"KMDecimate\btn_update.psd",26]
 
 // ---------------------------------------------------------------- Chinese labels
 [RoutineDef,kdApplyLang,

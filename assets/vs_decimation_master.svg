@@ -1,25 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 490" width="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 420" width="100%">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0d1117"/>
       <stop offset="50%" stop-color="#131924"/>
       <stop offset="100%" stop-color="#0e141f"/>
     </linearGradient>
-    <linearGradient id="kmCard" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#1c2433"/>
       <stop offset="100%" stop-color="#141a26"/>
-    </linearGradient>
-    <linearGradient id="dmCard" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#191d26"/>
-      <stop offset="100%" stop-color="#12151c"/>
     </linearGradient>
     <linearGradient id="orangeBar" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#ff8c3b"/>
       <stop offset="100%" stop-color="#e85d04"/>
-    </linearGradient>
-    <linearGradient id="blueBar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#2ea043"/>
-      <stop offset="100%" stop-color="#3fb950"/>
     </linearGradient>
     <linearGradient id="grayBar" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#484f58"/>
@@ -35,152 +27,123 @@
   </defs>
 
   <!-- Outer Canvas -->
-  <rect width="1120" height="490" rx="14" fill="url(#bg)" stroke="#30363d" stroke-width="1.5"/>
+  <rect width="1120" height="420" rx="14" fill="url(#bg)" stroke="#30363d" stroke-width="1.5"/>
 
   <!-- Header -->
-  <text x="560" y="38" text-anchor="middle" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="21" font-weight="bold">
-    KM Decimate 0.4.0 vs ZBrush 默认减面大师 (Decimation Master)
-  </text>
-  <text x="560" y="62" text-anchor="middle" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">
-    架构、单次直达效率、顶点色高光保护与操作体验全方位对比
+  <text x="560" y="42" text-anchor="middle" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="22" font-weight="bold">
+    KM Decimate 0.4.0  vs  ZBrush 减面大师 (Decimation Master)
   </text>
 
-  <!-- Left Panel: Workflow & Architecture Comparison -->
-  <g transform="translate(28, 82)" filter="url(#shadow)">
-    <rect width="520" height="380" rx="12" fill="url(#kmCard)" stroke="#30363d" stroke-width="1.2"/>
-    <rect width="520" height="40" rx="12" fill="#212836"/>
-    <path d="M0 28 H520 V40 H0 Z" fill="#212836"/>
-    <circle cx="22" cy="20" r="5" fill="#ff7b29"/>
-    <text x="36" y="25" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="bold">
-      1. 交互流程与多核并行效率（3401 万面带顶点色 → 5%）
+  <!-- Left Panel: Workflow & Speed Comparison -->
+  <g transform="translate(28, 68)" filter="url(#shadow)">
+    <rect width="520" height="324" rx="12" fill="url(#card)" stroke="#30363d" stroke-width="1.2"/>
+    <rect width="520" height="42" rx="12" fill="#212836"/>
+    <path d="M0 30 H520 V42 H0 Z" fill="#212836"/>
+    <circle cx="24" cy="21" r="5" fill="#ff7b29"/>
+    <text x="40" y="26" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15.5" font-weight="bold">
+      1. 流程对比（3401 万面带顶点色 → 5%）
     </text>
 
     <!-- Decimation Master Timeline -->
-    <text x="22" y="68" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">
-      ZBrush 自带减面大师 (Decimation Master) — 两步阻塞流程
+    <text x="26" y="72" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13.5" font-weight="bold">
+      自带减面大师 — 需两步（每次改模型/遮罩都要重新预处理）
     </text>
-    <!-- Bar 1: Pre-process -->
-    <rect x="22" y="80" width="380" height="30" rx="5" fill="url(#redBar)" stroke="#da5b5b" stroke-width="1"/>
-    <text x="32" y="100" fill="#ffffff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">
-      ① Pre-process（建全局渐进网格 + 写数 GB 临时缓存 VSplitList.data）
+    <rect x="26" y="84" width="356" height="34" rx="6" fill="url(#redBar)" stroke="#da5b5b" stroke-width="1"/>
+    <text x="204" y="106" text-anchor="middle" fill="#ffffff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">
+      ① Pre-process 预处理（写数 GB 缓存，常需数分钟）
     </text>
-    <rect x="406" y="80" width="90" height="30" rx="5" fill="url(#grayBar)" stroke="#8b949e" stroke-width="1"/>
-    <text x="451" y="100" text-anchor="middle" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">
+    <rect x="390" y="84" width="104" height="34" rx="6" fill="url(#grayBar)" stroke="#8b949e" stroke-width="1"/>
+    <text x="442" y="106" text-anchor="middle" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">
       ② Decimate
     </text>
-    <text x="22" y="128" fill="#a2aab4" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5">
-      • 每次改模型、改遮罩或改顶点色开关，都必须重新跑漫长的 Pre-process 预处理
-    </text>
-    <text x="22" y="146" fill="#a2aab4" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5">
-      • 勾 Use and Keep Polypaint 时全局颜色二次误差堆庞大，千万面预处理常需数分钟
-    </text>
 
-    <line x1="22" y1="162" x2="498" y2="162" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="26" y1="138" x2="494" y2="138" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
 
     <!-- KM Decimate Timeline -->
-    <text x="22" y="188" fill="#ff964f" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">
-      KM Decimate 0.4.0 — 免预处理一键直达（16~24 线程全核满载）
+    <text x="26" y="166" fill="#ff964f" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13.5" font-weight="bold">
+      KM Decimate — 免预处理一键直达（16~24 线程全核并行）
     </text>
-    <rect x="22" y="200" width="115" height="32" rx="6" fill="url(#orangeBar)" stroke="#ffb078" stroke-width="1.2"/>
-    <text x="79" y="221" text-anchor="middle" fill="#ffffff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">
-      核心仅 5.10 秒
+    <rect x="26" y="178" width="136" height="36" rx="6" fill="url(#orangeBar)" stroke="#ffb078" stroke-width="1.2"/>
+    <text x="94" y="201" text-anchor="middle" fill="#ffffff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="14" font-weight="bold">
+      ⚡ 核心 5.10 秒
     </text>
-    <rect x="145" y="204" width="112" height="24" rx="12" fill="#172b22" stroke="#2ea043" stroke-width="1"/>
-    <text x="201" y="220" text-anchor="middle" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5" font-weight="bold">
-      ⚡ 免 Pre-process
+    <rect x="174" y="182" width="102" height="28" rx="14" fill="#172b22" stroke="#2ea043" stroke-width="1"/>
+    <text x="225" y="201" text-anchor="middle" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">
+      免预处理
     </text>
-    <rect x="265" y="204" width="115" height="24" rx="12" fill="#172436" stroke="#388bfd" stroke-width="1"/>
-    <text x="322" y="220" text-anchor="middle" fill="#58a6ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5" font-weight="bold">
-      零 GB 级缓存落盘
+    <rect x="286" y="182" width="102" height="28" rx="14" fill="#172436" stroke="#388bfd" stroke-width="1"/>
+    <text x="337" y="201" text-anchor="middle" fill="#58a6ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">
+      零缓存落盘
     </text>
-    <rect x="388" y="204" width="110" height="24" rx="12" fill="#2b1d2e" stroke="#a371f7" stroke-width="1"/>
-    <text x="443" y="220" text-anchor="middle" fill="#d2a8ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5" font-weight="bold">
-      Esc 0.2s 安全取消
-    </text>
-
-    <text x="22" y="252" fill="#c9d1d9" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5">
-      • 读 0.32s + 减面 4.76s + 写 0.02s（667 万面/秒吞吐），点一下「减面」直接出结果
-    </text>
-    <text x="22" y="270" fill="#c9d1d9" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5">
-      • 每块 ≤3 万面锁定在 CPU L2/L3 缓存内，4 叉堆 + over 池过滤 87% 无效出堆
+    <rect x="398" y="182" width="96" height="28" rx="14" fill="#2b1d2e" stroke="#a371f7" stroke-width="1"/>
+    <text x="446" y="201" text-anchor="middle" fill="#d2a8ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">
+      Esc 秒取消
     </text>
 
-    <line x1="22" y1="286" x2="498" y2="286" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
+    <line x1="26" y1="232" x2="494" y2="232" stroke="#30363d" stroke-width="1" stroke-dasharray="4,4"/>
 
-    <!-- Same-mesh Accuracy Benchmark (big7m 7.5M -> 1%) -->
-    <text x="22" y="310" fill="#58a6ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">
-      同输入同面数几何精度实测（750.7 万面高模减至 1% = 74,850 面，对角线 119.6）
+    <!-- Accuracy comparison cards -->
+    <text x="26" y="256" fill="#58a6ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">
+      同模型同面数几何误差对比（750 万面 → 1%）
     </text>
-    <rect x="22" y="320" width="232" height="46" rx="7" fill="#111620" stroke="#2f3747" stroke-width="1"/>
-    <text x="34" y="339" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5">减面大师 (Decimation Master)</text>
-    <text x="34" y="357" fill="#e6edf3" font-family="Consolas, monospace" font-size="12" font-weight="bold">Mean: 2.984e-3 (0.00249%)</text>
+    <rect x="26" y="266" width="224" height="44" rx="7" fill="#111620" stroke="#2f3747" stroke-width="1"/>
+    <text x="138" y="285" text-anchor="middle" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">自带减面大师</text>
+    <text x="138" y="303" text-anchor="middle" fill="#e6edf3" font-family="Consolas, monospace" font-size="12.5" font-weight="bold">误差 0.00249%</text>
 
-    <rect x="266" y="320" width="232" height="46" rx="7" fill="#111c19" stroke="#2ea043" stroke-width="1"/>
-    <text x="278" y="339" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5" font-weight="bold">KM Decimate（24 线程分块并行）</text>
-    <text x="278" y="357" fill="#e6edf3" font-family="Consolas, monospace" font-size="12" font-weight="bold">Mean: 3.006e-3 (0.00251%)</text>
+    <rect x="270" y="266" width="224" height="44" rx="7" fill="#111c19" stroke="#2ea043" stroke-width="1"/>
+    <text x="382" y="285" text-anchor="middle" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">KM Decimate (24 线程)</text>
+    <text x="382" y="303" text-anchor="middle" fill="#e6edf3" font-family="Consolas, monospace" font-size="12.5" font-weight="bold">误差 0.00251% (几乎一致)</text>
   </g>
 
-  <!-- Right Panel: Feature-by-Feature Matrix -->
-  <g transform="translate(572, 82)" filter="url(#shadow)">
-    <rect width="520" height="380" rx="12" fill="url(#kmCard)" stroke="#30363d" stroke-width="1.2"/>
-    <rect width="520" height="40" rx="12" fill="#212836"/>
-    <path d="M0 28 H520 V40 H0 Z" fill="#212836"/>
-    <circle cx="22" cy="20" r="5" fill="#2ea043"/>
-    <text x="36" y="25" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15" font-weight="bold">
-      2. 核心能力与生产管线痛点对比
+  <!-- Right Panel: Clean 3-Column Feature Table -->
+  <g transform="translate(572, 68)" filter="url(#shadow)">
+    <rect width="520" height="324" rx="12" fill="url(#card)" stroke="#30363d" stroke-width="1.2"/>
+    <rect width="520" height="42" rx="12" fill="#212836"/>
+    <path d="M0 30 H520 V42 H0 Z" fill="#212836"/>
+    <circle cx="24" cy="21" r="5" fill="#2ea043"/>
+    <text x="40" y="26" fill="#f0f6fc" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="15.5" font-weight="bold">
+      2. 核心体验对比
     </text>
 
     <!-- Table Header -->
-    <rect x="16" y="50" width="488" height="28" rx="5" fill="#0d1117"/>
-    <text x="28" y="69" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">对比维度</text>
-    <text x="215" y="69" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">自带减面大师</text>
-    <text x="355" y="69" fill="#ff964f" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">KM Decimate 0.4.0</text>
+    <rect x="18" y="52" width="484" height="30" rx="6" fill="#0d1117"/>
+    <text x="32" y="72" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">功能维度</text>
+    <text x="176" y="72" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">自带减面大师</text>
+    <text x="336" y="72" fill="#ff964f" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">KM Decimate 0.4.0</text>
 
     <!-- Row 1 -->
-    <text x="28" y="102" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">操作步数与缓存</text>
-    <text x="215" y="102" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">需先 Pre-process 写数 GB 缓存</text>
-    <text x="355" y="102" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">一键直达，免预处理缓存</text>
-    <line x1="20" y1="114" x2="500" y2="114" stroke="#262c36" stroke-width="1"/>
+    <text x="32" y="108" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">操作步数</text>
+    <text x="176" y="108" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">需先 Pre-process</text>
+    <text x="336" y="108" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">一键直达，免预处理</text>
+    <line x1="22" y1="120" x2="498" y2="120" stroke="#262c36" stroke-width="1"/>
 
     <!-- Row 2 -->
-    <text x="28" y="138" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">顶点色 (Polypaint)</text>
-    <text x="215" y="138" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">固定权重，5% 下瞳孔/睫毛易糊</text>
-    <text x="355" y="138" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">1-10 级滑条 + 跨色切向锁边</text>
-    <line x1="20" y1="150" x2="500" y2="150" stroke="#262c36" stroke-width="1"/>
+    <text x="32" y="146" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">顶点色细节</text>
+    <text x="176" y="146" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">固定权重，瞳孔易糊</text>
+    <text x="336" y="146" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">1-10 级滑条 + 颜色锁边</text>
+    <line x1="22" y1="158" x2="498" y2="158" stroke="#262c36" stroke-width="1"/>
 
     <!-- Row 3 -->
-    <text x="28" y="174" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">遮罩 (Mask16)</text>
-    <text x="215" y="174" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">改遮罩必须重跑 Pre-process</text>
-    <text x="355" y="174" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">画完即减，结果完整保留遮罩</text>
-    <line x1="20" y1="186" x2="500" y2="186" stroke="#262c36" stroke-width="1"/>
+    <text x="32" y="184" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">遮罩 &amp; 分组</text>
+    <text x="176" y="184" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">改遮罩重算 / 易丢分组</text>
+    <text x="336" y="184" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">完整保留遮罩与组边界</text>
+    <line x1="22" y1="196" x2="498" y2="196" stroke="#262c36" stroke-width="1"/>
 
     <!-- Row 4 -->
-    <text x="28" y="210" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">Polygroup 组边界</text>
-    <text x="215" y="210" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">经常把 Polygroup 合并或抹掉</text>
-    <text x="355" y="210" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">完整保留分组 + 组边界防变形</text>
-    <line x1="20" y1="222" x2="500" y2="222" stroke="#262c36" stroke-width="1"/>
+    <text x="32" y="222" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">保留原物体</text>
+    <text x="176" y="222" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">仅原地覆盖</text>
+    <text x="336" y="222" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">可选留副本或原地替换</text>
+    <line x1="22" y1="234" x2="498" y2="234" stroke="#262c36" stroke-width="1"/>
 
     <!-- Row 5 -->
-    <text x="28" y="246" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">保留原物体 / 副本</text>
-    <text x="215" y="246" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">永远原地覆盖，需手动先复制</text>
-    <text x="355" y="246" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">一键切换副本 (_KM%) 或原地</text>
-    <line x1="20" y1="258" x2="500" y2="258" stroke="#262c36" stroke-width="1"/>
+    <text x="32" y="260" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">同名子工具</text>
+    <text x="176" y="260" fill="#f85149" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">直接报错拒绝运行</text>
+    <text x="336" y="260" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">按索引批量，同名无碍</text>
+    <line x1="22" y1="272" x2="498" y2="272" stroke="#262c36" stroke-width="1"/>
 
     <!-- Row 6 -->
-    <text x="28" y="282" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">同名子工具批量</text>
-    <text x="215" y="282" fill="#f85149" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">同名子工具直接报错拒绝运行</text>
-    <text x="355" y="282" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">按索引自底向上遍历，同名无碍</text>
-    <line x1="20" y1="294" x2="500" y2="294" stroke="#262c36" stroke-width="1"/>
-
-    <!-- Row 7 -->
-    <text x="28" y="318" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">中途取消与防卡死</text>
-    <text x="215" y="318" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">ZBrush 未响应时按键常失灵</text>
-    <text x="355" y="318" fill="#3fb950" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">独立监测 Esc 0.2s 停机并回滚</text>
-    <line x1="20" y1="330" x2="500" y2="330" stroke="#262c36" stroke-width="1"/>
-
-    <!-- Row 8 -->
-    <text x="28" y="355" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="bold">ZRemesher 联动</text>
-    <text x="215" y="355" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12">无（需手动减面→拓扑→细分→投射）</text>
-    <text x="355" y="355" fill="#58a6ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="12" font-weight="bold">一键预减面 + 拓扑 + 逐级投射</text>
+    <text x="32" y="298" fill="#e6edf3" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">重拓扑联动</text>
+    <text x="176" y="298" fill="#8b949e" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13">需手动多步操作</text>
+    <text x="336" y="298" fill="#58a6ff" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="13" font-weight="bold">一键预减面+拓扑+投射</text>
   </g>
 </svg>
