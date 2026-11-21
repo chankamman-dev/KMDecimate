@@ -64,9 +64,16 @@ def assemble():
     shutil.copy2(os.path.join(ZB, "KMDecimate.txt"), os.path.join(DIST, "KMDecimate.txt"))
     shutil.copy2(os.path.join(ROOT, "bin", "KMDecimate.exe"), d)
     shutil.copy2(os.path.join(ZB, "KMDecimate", "KMDecimate.GoZ"), d)
-    zfu = [p for p in [os.environ.get("KM_ZFU", ""), ZFU] + ZFU_OTHERS if p and os.path.exists(p)]
+    shutil.copy2(os.path.join(ZB, "KMDecimate", "KMDecimate_UV.GoZ"), d)
+    zfu_cands = [
+        os.environ.get("KM_ZFU", ""),
+        os.environ.get("ZFU", ""),
+        os.path.join(ZB, "KMDecimate", "ZFileUtils64.dll"),
+        ZFU,
+    ] + ZFU_OTHERS
+    zfu = [p for p in zfu_cands if p and os.path.exists(p)]
     if not zfu:
-        raise SystemExit("找不到 ZFileUtils64.dll：设置环境变量 KM_ZFU 指向它")
+        raise SystemExit("找不到 ZFileUtils64.dll：设置环境变量 KM_ZFU 或 ZFU 指向它")
     shutil.copy2(zfu[0], d)
     build_lang(os.path.join(d, "lang_zh.bin"))
     print("已组装到 %s" % DIST)

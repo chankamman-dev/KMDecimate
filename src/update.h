@@ -60,20 +60,44 @@ inline int httpGet(const std::wstring& path, std::string& body, std::string& err
     return status;
 }
 
-// JSON 里第一个 "key":"值"（Release 的 tag_name / html_url 都在作者信息之前，取第一个就是 Release 自己的）
+// 匹配顶层 JSON 对象里的 "key":"值"（按括号层级跳过嵌套对象，避免误取 author.html_url 等子字段）
 inline std::string jsonString(const std::string& j, const std::string& key) {
-    size_t p = j.find("\"" + key + "\"");
-    if (p == std::string::npos) return "";
-    p = j.find(':', p);
-    if (p == std::string::npos) return "";
-    p = j.find('"', p);
-    if (p == std::string::npos) return "";
-    std::string v;
-    for (size_t i = p + 1; i < j.size() && j[i] != '"'; i++) {
-        if (j[i] == '\\' && i + 1 < j.size()) i++;
-        v += j[i];
+    int depth = 0;
+    size_t n = j.size();
+    auto readStr = [&](size_t& i) -> std::string {
+        std::string v;
+        for (i++; i < n && j[i] != '"'; i++) {
+            if (j[i] == '\\' && i + 1 < n) {
+                char c = j[++i];
+                if (c == 'n') v += '\n';
+                else if (c == 'r') v += '\r';
+                else if (c == 't') v += '\t';
+                else v += c;
+            } else {
+                v += j[i];
+            }
+        }
+        return v;
+    };
+    for (size_t i = 0; i < n; i++) {
+        char c = j[i];
+        if (c == '{' || c == '[') { depth++; continue; }
+        if (c == '}' || c == ']') { depth--; continue; }
+        if (c != '"') continue;
+        std::string s = readStr(i);
+        if (depth != 1) continue;
+        size_t k = i + 1;
+        while (k < n && (j[k] == ' ' || j[k] == '\t' || j[k] == '\r' || j[k] == '\n')) k++;
+        if (k < n && j[k] == ':') {
+            k++;
+            while (k < n && (j[k] == ' ' || j[k] == '\t' || j[k] == '\r' || j[k] == '\n')) k++;
+            if (s == key && k < n && j[k] == '"') {
+                size_t p = k;
+                return readStr(p);
+            }
+        }
     }
-    return v;
+    return "";
 }
 
 // "v0.3.10" -> {0, 3, 10}
@@ -101,15 +125,27 @@ inline int box(const std::wstring& text, UINT type) {
     return MessageBoxW(GetForegroundWindow(), text.c_str(), L"KM减面大王：检查更新", type | MB_TOPMOST | MB_SETFOREGROUND);
 }
 
-inline void openUrl(const std::wstring& url) {
-    ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+inline void openUrl(const std::wstring& url, const std::wstring& fallback) {
+    const wchar_t* prefix = L"https://github.com/";
+    bool ok = url.size() >= 19 && _wcsnicmp(url.c_str(), prefix, 19) == 0;
+    const std::wstring& target = ok ? url : fallback;
+    ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 inline int checkUpdate(const std::wstring& zvrPath, const std::vector<float>& v) {
-    char cur[64];
-    snprintf(cur, sizeof cur, "%d.%d.%d", v.size() > 1 ? (int)v[1] : 0, v.size() > 2 ? (int)v[2] : 0, v.size() > 3 ? (int)v[3] : 0);
     std::wstring repo = envOr(L"KMDEC_UPDATE_REPO", REPO);
     std::wstring page = L"https://github.com/" + repo + L"/releases";
+    std::wstring out = zvrPath.substr(0, zvrPath.find_last_of(L"\\/") + 1) + L"update.txt";
+    if (v.size() < 4 || v[0] != 1) {
+        box(L"检查更新失败：读不到插件版本信息（update.zvr）。", MB_OK | MB_ICONWARNING);
+        if (FILE* f = _wfopen(out.c_str(), L"wb")) {
+            fprintf(f, "error 0 - - -\r\n");
+            fclose(f);
+        }
+        return 2;
+    }
+    char cur[64];
+    snprintf(cur, sizeof cur, "%d.%d.%d", (int)v[1], (int)v[2], (int)v[3]);
     std::string body, err;
     int code = httpGet(L"/repos/" + repo + L"/releases/latest", body, err);
     std::string tag = code == 200 ? jsonString(body, "tag_name") : "";
@@ -121,7 +157,7 @@ inline int checkUpdate(const std::wstring& zvrPath, const std::vector<float>& v)
         if (versionLess(parseVersion(cur), parseVersion(tag))) {
             state = "new";
             if (box(L"发现新版本 " + wtag + L"（现在装的是 " + wcur + L"）。\n\n打开下载页面吗？", MB_YESNO | MB_ICONINFORMATION) == IDYES)
-                openUrl(url.empty() ? page : widen(url));
+                openUrl(url.empty() ? page : widen(url), page);
         } else {
             state = "latest";
             box(L"已经是最新版本（" + wcur + L"）。", MB_OK | MB_ICONINFORMATION);
@@ -133,9 +169,8 @@ inline int checkUpdate(const std::wstring& zvrPath, const std::vector<float>& v)
                          : code == 403 ? L"GitHub 暂时限制了访问次数，过一会儿再试。"
                          : L"GitHub 返回了 " + std::to_wstring(code) + L"。";
         if (box(L"检查更新失败：" + why + L"\n\n现在装的是 " + wcur + L"。要打开发布页面自己看看吗？", MB_YESNO | MB_ICONWARNING) == IDYES)
-            openUrl(page);
+            openUrl(page, page);
     }
-    std::wstring out = zvrPath.substr(0, zvrPath.find_last_of(L"\\/") + 1) + L"update.txt";
     if (FILE* f = _wfopen(out.c_str(), L"wb")) {
         fprintf(f, "%s %d %s %s %s\r\n", state.c_str(), code, cur, tag.empty() ? "-" : tag.c_str(), url.empty() ? "-" : url.c_str());
         fclose(f);

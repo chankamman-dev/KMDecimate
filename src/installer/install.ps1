@@ -58,9 +58,30 @@ function Find-Targets {
     }
     foreach ($r in ($roots | Select-Object -Unique)) {
         foreach ($a in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue)) {
-            if ($a.Name -notmatch 'zbrush|pixologic|maxon') { continue }
-            $cands = @($a) + @(Get-ChildItem -LiteralPath $a.FullName -Directory -ErrorAction SilentlyContinue)
-            foreach ($c in $cands) { Add-Found $found (Join-Path $c.FullName 'ZStartup\ZPlugs64') '' }
+            if ($a.Name -match 'zbrush|pixologic|maxon') {
+                $cands = @($a) + @(Get-ChildItem -LiteralPath $a.FullName -Directory -ErrorAction SilentlyContinue)
+                foreach ($c in $cands) { Add-Found $found (Join-Path $c.FullName 'ZStartup\ZPlugs64') '' }
+            }
+            elseif ($a.Name -notmatch '^(Windows|ProgramData|\$Recycle\.Bin|System Volume Information|Recovery|PerfLogs|Users)$') {
+                # 也检查非系统一级目录下的子文件夹（例如 F:\art software\zbrush 2024.0.4）
+                foreach ($b in @(Get-ChildItem -LiteralPath $a.FullName -Directory -ErrorAction SilentlyContinue)) {
+                    if ($b.Name -match 'zbrush|pixologic|maxon') {
+                        Add-Found $found (Join-Path $b.FullName 'ZStartup\ZPlugs64') ''
+                    }
+                }
+            }
+        }
+    }
+    # 注册表卸载项中的 InstallLocation（覆盖自定义深层安装目录）
+    foreach ($rk in @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )) {
+        foreach ($item in @(Get-ItemProperty -Path $rk -ErrorAction SilentlyContinue)) {
+            if ($item.DisplayName -match 'ZBrush' -and $item.InstallLocation) {
+                Add-Found $found (Join-Path $item.InstallLocation 'ZStartup\ZPlugs64') ''
+            }
         }
     }
     # ZBrush 2026：插件在用户资源目录里。默认是 %APPDATA%\Maxon\ZBrush <版本>_<编号>\，

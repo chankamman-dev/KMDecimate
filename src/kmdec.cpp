@@ -4,9 +4,29 @@
 #include "decimate.h"
 #include "update.h"
 #include <windows.h>
+#include <psapi.h>
+
+static double peakCommitMiB() {
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    pmc.cb = sizeof pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof pmc))
+        return double(pmc.PeakPagefileUsage) / (1024.0 * 1024.0);
+    return -1.0;
+}
+
+static void systemAvailMiB(double& phys, double& page) {
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof ms;
+    if (GlobalMemoryStatusEx(&ms)) {
+        phys = double(ms.ullAvailPhys) / (1024.0 * 1024.0);
+        page = double(ms.ullAvailPageFile) / (1024.0 * 1024.0);
+    } else {
+        phys = page = -1.0;
+    }
+}
 
 static void usage() {
-    printf("用法：kmdec 输入 输出 [--percent P | --tris N | --verts N] [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W] [--color W] [--coloredge W]\n"
+    printf("用法：kmdec 输入 输出 [--percent P | --tris N | --verts N] [--threads N] [--chunks K] [--part T] [--slack S] [--border W] [--groups W] [--color W] [--coloredge W] [--mask W] [--uv W]\n"
            "  --threads 1 = 经典单线程 QEM（对照组）；默认用全部逻辑核\n");
 }
 
@@ -16,7 +36,14 @@ static bool zbrushInFront() {
     if (!h) return false;
     wchar_t cls[64] = {};
     GetClassNameW(h, cls, 64);
-    if (wcscmp(cls, L"Ghost") == 0) return true;
+    if (wcscmp(cls, L"Ghost") == 0) {
+        wchar_t title[256] = {};
+        if (GetWindowTextW(h, title, 256) > 0) {
+            for (wchar_t* p = title; *p; p++) *p = towlower(*p);
+            if (wcsstr(title, L"zbrush") != nullptr) return true;
+        }
+        return false;
+    }
     DWORD pid = 0;
     GetWindowThreadProcessId(h, &pid);
     if (pid == GetCurrentProcessId()) return true;
@@ -88,7 +115,9 @@ struct Job {
     std::wstring in, out;
     double percent = 10, detail = 1;  // detail：0 = 不保留顶点色，1–10 = 颜色细节
     double target = 0;                // 目标三角形数：大于 0 时按它减，不看百分比（重拓扑前的预减面用）
+    double runId = -1;                // ZBrush 侧本次运行的编号（kdT0），用于精确关联 log.txt 与 zb_times.txt
     int groups = 0, threads = 0;
+    int keepMask = 0, keepUV = 0;     // job.zvr 第 8/9 项（旧版 8 项任务默认为 0）
     std::string src;                  // 从哪读的，写进 log
 };
 
@@ -134,7 +163,10 @@ static Job readJob(const std::wstring& path, const std::wstring& dir) {
             j.groups = int(v[2]);
             j.threads = int(v[3]);
             j.detail = v[4];
+            j.runId = v.size() > 6 ? double(v[6]) : -1.0;
             j.target = v.size() > 7 ? v[7] : 0;
+            j.keepMask = v.size() > 8 ? int(v[8]) : 0;
+            j.keepUV = v.size() > 9 ? int(v[9]) : 0;
             char t[64];
             snprintf(t, sizeof t, "zvr jobtxt=%g", v.size() > 5 ? double(v[5]) : -999.0);
             j.src = t;
@@ -193,15 +225,25 @@ static int runJob(const std::wstring& jobPath) {
     kmd::gRemoved = 0;
     kmd::gCancel = false;
     Monitor mon(dir);
+    const char* stage = "read_job";
+    size_t inTris = 0;
+    double logPercent = 0, logTarget = 0, logRunId = -1;
+    size_t logPartTris = DecimateOptions{}.partTris;
     try {
         Job job = readJob(jobPath, dir);
         const std::wstring& in = job.in;
         const std::wstring& out = job.out;
         double percent = job.percent;
+        logPercent = percent;
+        logTarget = job.target;
+        logRunId = job.runId;
         DecimateOptions o;
         o.fastExit = true;  // 减完写出结果就退出
         o.groupWeight = job.groups ? 10 : 0;
+        o.maskWeight = job.keepMask ? 10.0 : 0.0;
+        o.uvWeight = job.keepUV ? 10.0 : 0.0;
         o.threads = job.threads;
+        logPartTris = o.partTris;
         double detail = job.detail;
         bool keepColor = detail > 0;
         if (keepColor) {
@@ -212,40 +254,71 @@ static int runJob(const std::wstring& jobPath) {
         if (GetFileAttributesW(L"C:\\Users\\Public\\KMDecimate\\keep_input") != INVALID_FILE_ATTRIBUTES)
             CopyFileW(in.c_str(), (dir + L"last_in.GoZ").c_str(), FALSE);
 
+        stage = "load";
         auto t0 = kmd::Clock::now();
         Mesh m = loadMesh(in);
         double tLoad = kmd::secs(t0);
-        if (m.nt() == 0) throw std::runtime_error("导出的模型是空的");
+        inTris = m.nt();
+        if (inTris == 0) throw std::runtime_error("导出的模型是空的");
         bool hadColor = !m.C.empty();
+        bool hadMask = !m.M.empty();
+        bool hadUV = !m.UV.empty();
         if (!keepColor) m.C.clear();  // 只按形状减，结果不带 Polypaint
+        if (!job.keepMask) m.M.clear();
+        if (!job.keepUV) m.UV.clear();
         if (kmd::gCancel) throw kmd::Cancelled();
-        o.targetTris = job.target > 0 ? size_t(job.target) : size_t(std::max(4.0, m.nt() * percent / 100));
-        mon.toRemove = m.nt() > o.targetTris ? m.nt() - o.targetTris : 1;
+        o.targetTris = job.target > 0 ? size_t(job.target) : size_t(std::max(4.0, inTris * percent / 100));
+        mon.toRemove = inTris > o.targetTris ? inTris - o.targetTris : 1;
         mon.stage = 1;
+        stage = "decimate";
         DecimateStats st;
         auto t1 = kmd::Clock::now();
-        Mesh r = decimate(m, o, st);
+        Mesh r = decimate(std::move(m), o, st);
         double tDec = kmd::secs(t1);
         if (kmd::gCancel) throw kmd::Cancelled();
         mon.stage = 2;
+        stage = "save";
         auto t2 = kmd::Clock::now();
         saveMesh(out, r);
         double tSave = kmd::secs(t2);
-        char note[512], log[512];
-        snprintf(note, sizeof note, "KM减面大王：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）%s", m.nt(), r.nt(), r.nv(),
-                 tDec, tLoad, tSave, st.threads, !hadColor ? "" : keepColor ? "，保留了顶点色" : "，去掉了顶点色");
+        double peakMiB = peakCommitMiB();
+        char note[512], log[768];
+        snprintf(note, sizeof note, "KM减面大王：%zu → %zu 面（%zu 点），计算 %.2f 秒（读 %.2f，写 %.2f，%d 线程）%s%s%s", inTris, r.nt(), r.nv(),
+                 tDec, tLoad, tSave, st.threads,
+                 !hadColor ? "" : keepColor ? "，保留了顶点色" : "，去掉了顶点色",
+                 hadMask && job.keepMask ? "，保留了遮罩" : "",
+                 hadUV && job.keepUV ? "，保留了 UV" : "");
         snprintf(log, sizeof log,
-                 "%s percent=%g groups=%d color=%g had_color=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d target=%.0f job=%s\r\n",
-                 toUtf8(in).c_str(), percent, o.groupWeight > 0, keepColor ? detail : 0.0, hadColor, m.nt(), r.nt(), tLoad, tDec, tSave, st.passes.size(),
-                 st.threads, job.target, job.src.c_str());
+                 "%s percent=%g groups=%d color=%g had_color=%d mask=%d uv=%d in_tris=%zu out_tris=%zu load=%.3f decimate=%.3f save=%.3f passes=%zu threads=%d part=%zu peak_commit_mib=%.0f target=%.0f run=%.0f job=%s\r\n",
+                 toUtf8(in).c_str(), percent, o.groupWeight > 0, keepColor ? detail : 0.0, hadColor,
+                 hadMask && job.keepMask ? 1 : 0, hadUV && job.keepUV ? 1 : 0,
+                 inTris, r.nt(), tLoad, tDec, tSave, st.passes.size(),
+                 st.threads, o.partTris, peakMiB, job.target, job.runId, job.src.c_str());
         finish("1", note, log);
         return 0;
     } catch (kmd::Cancelled&) {
-        finish("8", "KM减面大王：已取消（按了 Esc），模型没有改动。", "cancelled\r\n");
+        char log[256];
+        snprintf(log, sizeof log, "cancelled stage=%s in_tris=%zu peak_commit_mib=%.0f run=%.0f\r\n", stage, inTris, peakCommitMiB(), logRunId);
+        finish("8", "KM减面大王：已取消（按了 Esc），模型没有改动。", log);
         return 3;
+    } catch (std::bad_alloc&) {
+        double phys = -1, page = -1;
+        systemAvailMiB(phys, page);
+        char log[512];
+        snprintf(log, sizeof log,
+                 "KM减面大王出错：std::bad_alloc stage=%s in_tris=%zu percent=%g target=%.0f part=%zu peak_commit_mib=%.0f avail_phys_mib=%.0f avail_page_mib=%.0f run=%.0f\r\n",
+                 stage, inTris, logPercent, logTarget, logPartTris, peakCommitMiB(), phys, page, logRunId);
+        finish("9", "KM减面大王出错：内存不足（std::bad_alloc）。可先关闭占用内存的程序、清理历史记录或关闭“保留原物体”后重试。", log);
+        return 2;
     } catch (std::exception& e) {
+        double phys = -1, page = -1;
+        systemAvailMiB(phys, page);
         std::string msg = std::string("KM减面大王出错：") + e.what();
-        finish("9", msg, msg + "\r\n");
+        char log[768];
+        snprintf(log, sizeof log,
+                 "%s stage=%s in_tris=%zu percent=%g target=%.0f part=%zu peak_commit_mib=%.0f avail_phys_mib=%.0f avail_page_mib=%.0f run=%.0f\r\n",
+                 msg.c_str(), stage, inTris, logPercent, logTarget, logPartTris, peakCommitMiB(), phys, page, logRunId);
+        finish("9", msg, log);
         return 2;
     }
 }
@@ -284,32 +357,37 @@ int wmain(int argc, wchar_t** argv) {
         else if (k == L"--groups") o.groupWeight = v;
         else if (k == L"--color") o.colorWeight = v;
         else if (k == L"--coloredge") o.colorEdge = v;
+        else if (k == L"--mask") o.maskWeight = v;
+        else if (k == L"--uv") o.uvWeight = v;
         else { usage(); return 1; }
     }
     try {
         auto t0 = kmd::Clock::now();
         Mesh m = loadMesh(inPath);
         double tLoad = kmd::secs(t0);
-        if (verts > 0) o.targetTris = size_t(m.nt() * (verts / m.nv()));
+        size_t inTris = m.nt(), inVerts = m.nv();
+        if (verts > 0) o.targetTris = size_t(inTris * (verts / std::max<size_t>(1, inVerts)));
         else if (tris > 0) o.targetTris = size_t(tris);
-        else o.targetTris = size_t(m.nt() * percent / 100);
-        printf("读入 %s：%zu 顶点，%zu 三角形%s%s，%.3f 秒\n", toUtf8(inPath).c_str(), m.nv(), m.nt(),
-               m.C.empty() ? "" : "，有 Polypaint", m.G.empty() ? "" : "，有组", tLoad);
+        else o.targetTris = size_t(inTris * percent / 100);
+        printf("读入 %s：%zu 顶点，%zu 三角形%s%s%s%s，%.3f 秒\n", toUtf8(inPath).c_str(), inVerts, inTris,
+               m.C.empty() ? "" : "，有 Polypaint", m.M.empty() ? "" : "，有遮罩", m.UV.empty() ? "" : "，有 UV", m.G.empty() ? "" : "，有组", tLoad);
         DecimateStats st;
         auto t1 = kmd::Clock::now();
-        Mesh r = decimate(m, o, st);
+        Mesh r = decimate(std::move(m), o, st);
         double tDec = kmd::secs(t1);
         auto t2 = kmd::Clock::now();
         saveMesh(outPath, r);
         double tSave = kmd::secs(t2);
-        printf("减面（%d 线程）：%.3f 秒，其中准备 %.3f\n", st.threads, tDec, st.setup);
+        double peakMiB = peakCommitMiB();
+        printf("减面（%d 线程）：%.3f 秒，其中准备 %.3f，峰值提交内存 %.0f MiB\n", st.threads, tDec, st.setup, peakMiB);
         for (size_t i = 0; i < st.passes.size(); i++) {
             auto& p = st.passes[i];
             printf("  第%zu遍 %zu→%zu 面：%.3f 秒（%zu 块，接缝点 %zu，%d 轮，切块 %.3f，建堆 %.3f，合并 %.3f）\n", i + 1, p.fromTris, p.goal, p.time,
                    p.parts, p.seamVerts, p.rounds, p.cut, p.build, p.merge);
         }
         printf("结果：%zu 顶点，%zu 三角形（目标 %zu）\n写出 %s：%.3f 秒\n", r.nv(), r.nt(), o.targetTris, toUtf8(outPath).c_str(), tSave);
-        printf("TIMING load=%.3f decimate=%.3f save=%.3f in_tris=%zu out_tris=%zu out_verts=%zu\n", tLoad, tDec, tSave, m.nt(), r.nt(), r.nv());
+        printf("TIMING load=%.3f decimate=%.3f save=%.3f in_tris=%zu out_tris=%zu out_verts=%zu passes=%zu peak_commit_mib=%.1f\n",
+               tLoad, tDec, tSave, inTris, r.nt(), r.nv(), st.passes.size(), peakMiB);
     } catch (std::exception& e) {
         printf("出错：%s\n", e.what());
         return 2;
