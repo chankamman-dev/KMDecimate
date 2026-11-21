@@ -59,12 +59,18 @@ def assemble():
     r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "zscript_lint.py"), os.path.join(ZB, "KMDecimate.txt")])
     if r.returncode:
         raise SystemExit("ZScript 检查没通过")
+    r_ui = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_ui.py")])
+    if r_ui.returncode:
+        raise SystemExit("UI 按钮贴图生成失败")
     d = os.path.join(DIST, "KMDecimate")
     os.makedirs(d, exist_ok=True)
     shutil.copy2(os.path.join(ZB, "KMDecimate.txt"), os.path.join(DIST, "KMDecimate.txt"))
     shutil.copy2(os.path.join(ROOT, "bin", "KMDecimate.exe"), d)
     shutil.copy2(os.path.join(ZB, "KMDecimate", "KMDecimate.GoZ"), d)
     shutil.copy2(os.path.join(ZB, "KMDecimate", "KMDecimate_UV.GoZ"), d)
+    for psd in os.listdir(os.path.join(ZB, "KMDecimate")):
+        if psd.lower().endswith(".psd"):
+            shutil.copy2(os.path.join(ZB, "KMDecimate", psd), d)
     zfu_cands = [
         os.environ.get("KM_ZFU", ""),
         os.environ.get("ZFU", ""),

@@ -10,9 +10,29 @@
 [![ISA](https://img.shields.io/badge/CPU-x86--64--v2%20(2009%2B)-6f42c1?style=flat-square)](#%E4%BB%8E%E6%BA%90%E7%A0%81%E6%9E%84%E5%BB%BA%E4%B8%8E%E6%B5%8B%E8%AF%95)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20%20%7C%20Zero%20Deps-00599C?style=flat-square&logo=cplusplus)](#%E7%AE%97%E6%B3%95%E4%B8%8E%E6%9E%B6%E6%9E%84)
 
-[**下载安装包 (Releases)**](https://github.com/chankamman-dev/KMDecimate/releases/latest) · [**视觉效果对比**](#%E8%A7%86%E8%A7%89%E6%95%88%E6%9E%9C%E5%AF%B9%E6%AF%94) · [**核心特性**](#%E6%A0%B8%E5%BF%83%E7%89%B9%E6%80%A7) · [**安装与界面预览**](#%E5%AE%89%E8%A3%85%E4%B8%8E%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97) · [**性能与质量实测**](#%E6%80%A7%E8%83%BD%E4%B8%8E%E8%B4%A8%E9%87%8F%E5%AE%9E%E6%B5%8B) · [**算法与架构**](#%E7%AE%97%E6%B3%95%E4%B8%8E%E6%9E%84%E6%9E%B6)
+[**下载安装包 (Releases)**](https://github.com/chankamman-dev/KMDecimate/releases/latest) · [**对比自带减面大师**](#%E4%B8%8E-zbrush-%E8%87%AA%E5%B8%A6%E5%87%8F%E9%9D%A2%E5%A4%A7%E5%B8%88-decimation-master-%E5%AF%B9%E6%AF%94) · [**视觉效果对比**](#%E8%A7%86%E8%A7%89%E6%95%88%E6%9E%9C%E5%AF%B9%E6%AF%94) · [**核心特性**](#%E6%A0%B8%E5%BF%83%E7%89%B9%E6%80%A7) · [**安装与界面预览**](#%E5%AE%89%E8%A3%85%E4%B8%8E%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97) · [**性能与质量实测**](#%E6%80%A7%E8%83%BD%E4%B8%8E%E8%B4%A8%E9%87%8F%E5%AE%9E%E6%B5%8B) · [**算法与架构**](#%E7%AE%97%E6%B3%95%E4%B8%8E%E6%9E%84%E6%9E%B6)
 
 </div>
+
+---
+
+## 与 ZBrush 自带减面大师 (Decimation Master) 对比
+
+<p align="center">
+  <img src="assets/vs_decimation_master.svg" width="100%" alt="KM Decimate 0.4.0 vs ZBrush 默认减面大师 (Decimation Master) 全方位对比" />
+</p>
+
+| 对比维度 | ZBrush 自带减面大师 (`Decimation Master`) | **KM Decimate 0.4.0（KM减面大王）** |
+|---|---|---|
+| **操作流程与缓存** | **两步阻塞流程**：必须先跑漫长的 `Pre-process` 建立全局渐进网格并向磁盘写出数 GB 临时缓存（`VSplitList.data`），再点 `Decimate`；**只要修改了模型、遮罩或顶点色开关，就必须重新 Pre-process** | **一步直达（免 Pre-process）**：点一下「减面」直接完成，零 `.zpm` / `VSplitList` 缓存落盘；**3401 万面带顶点色高模减至 5% 核心仅需 `5.10 秒`**（吞吐达 **667 万面/秒**） |
+| **多核并行架构** | 全局渐进网格（`PM_QUADRIC3D` / `GPM_COLOR_QUADRIC`）在大模型 + 开启顶点色时全局堆远超 CPU 缓存，千万面预处理常需数分钟 | **自适应缓存分块（$\le 3$ 万面/块）+ 全局共享阈值 $	au$ + 4 叉堆 + `over` 池**：16~24 线程全核满载，工作集常驻 L2/L3 缓存，跨遍半格错位自动消除接缝 |
+| **同面数几何精度** | `big7m`（750.7 万面减至 1% = 74,850 面）：双向均值误差 `2.984e-3`（占对角线 `0.00249%`），P99 `1.072e-2` | 同模型同面数（24 线程分块并行）：双向均值误差 `3.006e-3`（占对角线 `0.00251%`），P99 `1.079e-2`——**精度几乎完全一致（差距 $< 0.8\%$），速度提升数倍至十余倍** |
+| **顶点色 (Polypaint) 质量** | `Use and Keep Polypaint` 权重固定且预处理极慢，高比例减面（5%）下瞳孔高光、睫毛与细描线容易糊成锯齿 | **1–10 级「颜色细节」滑条 + 跨颜色边界切向滑移约束**：平坦皮肤大面省面，自动把三角形密集排布在瞳孔、虹膜与描线上，5% 面数下眼神光依然锐利 |
+| **遮罩 (Mask) 与 Polygroup** | 改遮罩需重新预处理；减面后经常把 Polygroup 合并或抹掉 | **画完遮罩直接减面，结果完整保留 16 位遮罩与全部 Polygroup 分组**，并默认锁定 Polygroup 组边界不变形 |
+| **保留原物体 vs 原地替换** | 永远原地覆盖当前 SubTool，想保留原高模必须每次手动先 Duplicate | 面板自带 **「保留原物体」开关**：开启时自动复制并命名为 `原名_KM百分比`；关闭时直接原地替换（带细分级时也仅在减面成功后才删低级别） |
+| **批量减面与同名 SubTool** | 遇到同名 SubTool 直接弹窗报错 `Several SubTools have the same name... Cannot preprocess!` 拒绝运行 | **按 SubTool 索引自底向上遍历**（「批量减面(可见)」/「批量减面(全部)」），同名子工具完全不受影响，支持中途按 **Esc** 停止剩余队列 |
+| **中途取消与防假死** | ZBrush 进入“未响应”窗口时按键常常无法被 ZScript 捕获 | 后台进程通过 Win32 直接监听 ZBrush 窗口（含 Windows 未响应 Ghost 窗口）的 **Esc 键，0.2 秒内安全停机并自动清理副本**，绝不破坏原模型 |
+| **ZRemesher 重拓扑联动** | 无（需手动先减面 → ZRemesher → Divide 多级细分 → 逐级 ProjectAll） | 内置 **「重拓扑并投射」**：一键完成 **KM 预减面加速 → ZRemesher → 自动细分 → 逐级投射原高模细节** |
 
 ---
 
